@@ -165,6 +165,14 @@ button {
 }
 button:disabled { opacity: 0.5; cursor: default; }
 
+/* Once the button wraps below the input it should own the row — a stub button
+   floating under a full-width field reads as broken. */
+@media (max-width: 30rem) {
+  form { flex-direction: column; }
+  input[type="text"] { flex: 1 1 auto; width: 100%; }
+  button { width: 100%; }
+}
+
 .note { color: var(--muted); font-size: 0.8rem; margin-top: 0.75rem; }
 
 /* Data -------------------------------------------------------------------- */

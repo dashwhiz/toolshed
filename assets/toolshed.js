@@ -56,4 +56,61 @@ export function renderFooter() {
   document.body.append(footer);
 }
 
+
+/* Result rendering, shared by every tool that reports findings. ---------------- */
+
+const TONE_ICON = {
+  good: "circle-check",
+  warn: "triangle-alert",
+  bad: "circle-alert",
+  info: "info",
+};
+
+// Worst first, so the thing that matters is the thing you read.
+const TONE_ORDER = { bad: 0, warn: 1, info: 2, good: 3 };
+
+export function row(dl, term, value, mono) {
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  dd.textContent = value;
+  if (mono) dd.className = "data";
+  dl.append(dt, dd);
+}
+
+export function renderVerdict(el, tone, title, note) {
+  el.className = `verdict verdict--${tone}`;
+  const body = document.createElement("div");
+  const heading = document.createElement("h2");
+  heading.textContent = title;
+  const detail = document.createElement("p");
+  detail.textContent = note;
+  body.append(heading, detail);
+  el.replaceChildren(icon(TONE_ICON[tone], tone), body);
+}
+
+// findings: [{ level, headline, detail }]
+export function renderFindings(list, findings) {
+  const sorted = [...findings].sort((a, b) => TONE_ORDER[a.level] - TONE_ORDER[b.level]);
+  list.replaceChildren();
+  if (!sorted.length) {
+    sorted.push({ level: "info", headline: "Nothing notable", detail: "no signal either way." });
+  }
+  for (const { level, headline, detail } of sorted) {
+    const li = document.createElement("li");
+    li.className = "finding";
+    const text = document.createElement("span");
+    const strong = document.createElement("b");
+    strong.textContent = headline;
+    text.append(strong);
+    if (detail) text.append(` — ${detail}`);
+    li.append(icon(TONE_ICON[level], level), text);
+    list.append(li);
+  }
+}
+
+export function countBy(findings, level) {
+  return findings.filter((f) => f.level === level).length;
+}
+
 renderFooter();

@@ -36,16 +36,10 @@
       </p>
 
       <div id="results" hidden>
-        <div class="verdict" id="verdict">
-          <span id="verdict-icon"></span>
-          <div>
-            <h2 id="verdict-title"></h2>
-            <p id="verdict-note"></p>
-          </div>
-        </div>
+        <div class="verdict" id="verdict"></div>
 
         <p class="label">What stood out</p>
-        <ul class="findings" id="flags"></ul>
+        <ul class="findings" id="findings"></ul>
 
         <p class="label">Registration</p>
         <dl id="registration"></dl>
@@ -68,9 +62,11 @@
     </main>
 
     <script type="module">
-import { icon, renderFooter } from "../../assets/toolshed.js";
-      const DOH = "https://dns.google/resolve";
-      const DAY = 86400000;
+      import { row, renderVerdict, renderFindings, countBy } from "../../assets/toolshed.js";
+      import {
+        parseHost, toUnicode, dns, rdap, eventDate, registrarName,
+        describeAge, fmtDate, DAY,
+      } from "../../assets/domain.js";
 
       const els = {
         form: document.getElementById("form"),
@@ -79,173 +75,24 @@ import { icon, renderFooter } from "../../assets/toolshed.js";
         status: document.getElementById("status"),
         results: document.getElementById("results"),
         verdict: document.getElementById("verdict"),
-        verdictIcon: document.getElementById("verdict-icon"),
-        verdictTitle: document.getElementById("verdict-title"),
-        verdictNote: document.getElementById("verdict-note"),
-        flags: document.getElementById("flags"),
+        findings: document.getElementById("findings"),
         registration: document.getElementById("registration"),
         dns: document.getElementById("dns"),
         hosting: document.getElementById("hosting"),
       };
 
-      // RFC 3492. Browsers dropped the punycode global, and a homograph domain is
-      // exactly the case this tool exists to catch, so decode it here.
-      function punydecode(input) {
-        const base = 36, tmin = 1, tmax = 26, skew = 38, damp = 700, initialBias = 72, initialN = 128;
-        let n = initialN, i = 0, bias = initialBias;
-        const out = [];
-        let basic = input.lastIndexOf("-");
-        if (basic < 0) basic = 0;
-        for (let j = 0; j < basic; j++) out.push(input.charCodeAt(j));
-        for (let idx = basic > 0 ? basic + 1 : 0; idx < input.length; ) {
-          const oldi = i;
-          for (let w = 1, k = base; ; k += base) {
-            if (idx >= input.length) return null;
-            const c = input.charCodeAt(idx++);
-            let digit;
-            if (c >= 48 && c <= 57) digit = c - 22;
-            else if (c >= 65 && c <= 90) digit = c - 65;
-            else if (c >= 97 && c <= 122) digit = c - 97;
-            else return null;
-            i += digit * w;
-            const t = k <= bias ? tmin : k >= bias + tmax ? tmax : k - bias;
-            if (digit < t) break;
-            w *= base - t;
-          }
-          const outLen = out.length + 1;
-          let delta = oldi === 0 ? Math.floor((i - oldi) / damp) : (i - oldi) >> 1;
-          delta += Math.floor(delta / outLen);
-          let k = 0;
-          for (; delta > ((base - tmin) * tmax) >> 1; k += base) delta = Math.floor(delta / (base - tmin));
-          bias = Math.floor(k + ((base - tmin + 1) * delta) / (delta + skew));
-          n += Math.floor(i / outLen);
-          i %= outLen;
-          out.splice(i++, 0, n);
-        }
-        return String.fromCodePoint(...out);
-      }
-
-      function toUnicode(host) {
-        return host
-          .split(".")
-          .map((label) => {
-            if (!label.startsWith("xn--")) return label;
-            const decoded = punydecode(label.slice(4));
-            return decoded === null ? label : decoded;
-          })
-          .join(".");
-      }
-
-      function parseHost(raw) {
-        let value = raw.trim();
-        if (!value) return null;
-        if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) value = "https://" + value;
-        let host;
-        try {
-          host = new URL(value).hostname;
-        } catch {
-          return null;
-        }
-        host = host.replace(/\.$/, "").toLowerCase();
-        if (!host.includes(".") || /\s/.test(host)) return null;
-        return host;
-      }
-
-      async function dns(name, type) {
-        const url = `${DOH}?name=${encodeURIComponent(name)}&type=${type}`;
-        const res = await fetch(url, { headers: { accept: "application/dns-json" } });
-        if (!res.ok) throw new Error(`DNS lookup failed (${res.status})`);
-        const body = await res.json();
-        return {
-          nxdomain: body.Status === 3,
-          records: (body.Answer || []).filter((a) => a.type !== 5).map((a) => a.data),
-        };
-      }
-
-      // rdap.org redirects to whichever registry runs the TLD. A 404 usually means the
-      // name is unregistered, but it also means "wrong label" for www. and co.uk style
-      // names, so walk up before believing it.
-      async function rdap(host) {
-        const labels = host.split(".");
-        for (let i = 0; i < labels.length - 1; i++) {
-          const candidate = labels.slice(i).join(".");
-          const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(candidate)}`, {
-            headers: { accept: "application/rdap+json" },
-          });
-          if (res.ok) return { domain: candidate, data: await res.json() };
-          if (res.status !== 404) throw new Error(`Registry lookup failed (${res.status})`);
-        }
-        return null;
-      }
-
-      function eventDate(data, action) {
-        const found = (data.events || []).find((e) => e.eventAction === action);
-        return found ? new Date(found.eventDate) : null;
-      }
-
-      function registrarName(data) {
-        const entity = (data.entities || []).find((e) => (e.roles || []).includes("registrar"));
-        if (!entity) return null;
-        if (entity.vcardArray && Array.isArray(entity.vcardArray[1])) {
-          const fn = entity.vcardArray[1].find((f) => f[0] === "fn");
-          if (fn) return fn[3];
-        }
-        return entity.handle || null;
-      }
-
-      function describeAge(ms) {
-        const days = Math.floor(ms / DAY);
-        if (days < 1) return "today";
-        if (days === 1) return "1 day";
-        if (days < 60) return `${days} days`;
-        const months = Math.floor(days / 30);
-        if (months < 24) return `${months} months`;
-        return `${(days / 365).toFixed(1)} years`;
-      }
-
-      const fmtDate = (d) =>
-        d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-
-      function row(dl, term, value, mono) {
-        const dt = document.createElement("dt");
-        dt.textContent = term;
-        const dd = document.createElement("dd");
-        dd.textContent = value;
-        if (mono) dd.className = "data";
-        dl.append(dt, dd);
-      }
-
-      function setVerdict(tone, glyph) {
-        els.verdict.className = `verdict verdict--${tone}`;
-        els.verdictIcon.replaceChildren(icon(glyph, tone));
-      }
-
-      function addFlag(list, level, headline, detail) {
-        const li = document.createElement("li");
-        li.className = "finding";
-        const glyph = {
-          bad: "circle-alert",
-          warn: "triangle-alert",
-          good: "circle-check",
-          info: "info",
-        }[level];
-        const text = document.createElement("span");
-        const strong = document.createElement("b");
-        strong.textContent = headline;
-        text.append(strong);
-        if (detail) text.append(` — ${detail}`);
-        li.append(icon(glyph, level), text);
-        list.append(li);
-      }
-
       async function check(host) {
-        const flags = [];
+        const findings = [];
         const unicode = toUnicode(host);
         if (unicode !== host) {
-          flags.push(["bad", "Domain uses non-Latin characters", `reads as “${unicode}”. Letters that look like ASCII are a common way to impersonate a familiar name.`]);
+          findings.push({
+            level: "bad",
+            headline: "Domain uses non-Latin characters",
+            detail: `reads as “${unicode}”. Letters that look like ASCII are a common way to impersonate a familiar name.`,
+          });
         }
 
-        const val = (r) => (r.status === "fulfilled" ? r.value : null);
+        const settled = (r) => (r.status === "fulfilled" ? r.value : null);
 
         // Addresses belong to whatever host was typed, but MX, SPF and DMARC live on the
         // registrable domain — a www. subdomain never has them, and checking there would
@@ -255,7 +102,7 @@ import { icon, renderFooter } from "../../assets/toolshed.js";
           dns(host, "A"),
           dns(host, "AAAA"),
         ]);
-        const registration = val(reg);
+        const registration = settled(reg);
         const mailDomain = registration ? registration.domain : host;
 
         const [mx, ns, txt, dmarc] = await Promise.allSettled([
@@ -265,22 +112,19 @@ import { icon, renderFooter } from "../../assets/toolshed.js";
           dns("_dmarc." + mailDomain, "TXT"),
         ]);
 
-        const addresses = [...(val(a)?.records || []), ...(val(aaaa)?.records || [])];
-        const resolves = addresses.length > 0;
-
-        if (val(a)?.nxdomain && !resolves) {
-          flags.push(["bad", "Domain does not resolve", "no address record. It is not serving a site right now."]);
-        } else if (!resolves) {
-          flags.push(["warn", "No address record", "the name exists but points nowhere."]);
+        const addresses = [...(settled(a)?.records || []), ...(settled(aaaa)?.records || [])];
+        if (settled(a)?.nxdomain && !addresses.length) {
+          findings.push({ level: "bad", headline: "Domain does not resolve", detail: "no address record. It is not serving a site right now." });
+        } else if (!addresses.length) {
+          findings.push({ level: "warn", headline: "No address record", detail: "the name exists but points nowhere." });
         }
 
-        // Registration
         els.registration.replaceChildren();
         if (reg.status === "rejected") {
           row(els.registration, "Status", "Registry lookup failed — " + reg.reason.message);
         } else if (!registration) {
           row(els.registration, "Status", "No registry record found");
-          flags.push(["bad", "Not registered", "no registry has a record for this name. Check the spelling."]);
+          findings.push({ level: "bad", headline: "Not registered", detail: "no registry has a record for this name. Check the spelling." });
         } else {
           const created = eventDate(registration.data, "registration");
           const expires = eventDate(registration.data, "expiration");
@@ -292,64 +136,60 @@ import { icon, renderFooter } from "../../assets/toolshed.js";
             const age = Date.now() - created.getTime();
             row(els.registration, "Registered", `${fmtDate(created)} — ${describeAge(age)} ago`);
             if (age < 30 * DAY) {
-              flags.push(["bad", `Registered ${describeAge(age)} ago`, "brand new. Most throwaway scam domains are days old."]);
+              findings.push({ level: "bad", headline: `Registered ${describeAge(age)} ago`, detail: "brand new. Most throwaway scam domains are days old." });
             } else if (age < 180 * DAY) {
-              flags.push(["warn", `Registered ${describeAge(age)} ago`, "still young. Fine for a new business, worth noting for a familiar brand."]);
+              findings.push({ level: "warn", headline: `Registered ${describeAge(age)} ago`, detail: "still young. Fine for a new business, worth noting for a familiar brand." });
             } else if (age > 2 * 365 * DAY) {
-              flags.push(["good", `Registered ${describeAge(age)} ago`, "a long history is hard to fake."]);
+              findings.push({ level: "good", headline: `Registered ${describeAge(age)} ago`, detail: "a long history is hard to fake." });
             }
           } else {
             row(els.registration, "Registered", "not published by this registry");
           }
           if (expires) {
             row(els.registration, "Expires", fmtDate(expires));
-            const left = expires.getTime() - Date.now();
-            if (left < 30 * DAY) {
-              flags.push(["warn", "Expires within a month", "either about to be renewed, or about to be abandoned."]);
+            if (expires.getTime() - Date.now() < 30 * DAY) {
+              findings.push({ level: "warn", headline: "Expires within a month", detail: "either about to be renewed, or about to be abandoned." });
             }
           }
           if (registrar) row(els.registration, "Registrar", registrar);
           if (statuses.length) row(els.registration, "Registry status", statuses.join(", "), true);
           const held = statuses.filter((s) => /hold|pending ?delete/i.test(s));
           if (held.length) {
-            flags.push(["bad", "Registry has suspended this domain", `status: ${held.join(", ")}. Often follows an abuse report.`]);
+            findings.push({ level: "bad", headline: "Registry has suspended this domain", detail: `status: ${held.join(", ")}. Often follows an abuse report.` });
           }
         }
 
-        // DNS
         els.dns.replaceChildren();
         row(els.dns, "Addresses", addresses.length ? addresses.join(", ") : "none", true);
-        const nameservers = val(ns)?.records || [];
+        const nameservers = settled(ns)?.records || [];
         if (nameservers.length) row(els.dns, "Nameservers", nameservers.join(", "), true);
-
         if (mailDomain !== host) row(els.dns, "Mail checked on", mailDomain, true);
-        const mailServers = val(mx)?.records || [];
+
+        const mailServers = settled(mx)?.records || [];
         row(els.dns, "Mail servers", mailServers.length ? mailServers.join(", ") : "none", true);
-        if (mailServers.length === 0) {
-          flags.push(["warn", "Accepts no mail", `no MX record on ${mailDomain}, so nobody can email it. Unusual for a real business.`]);
+        if (!mailServers.length) {
+          findings.push({ level: "warn", headline: "Accepts no mail", detail: `no MX record on ${mailDomain}, so nobody can email it. Unusual for a real business.` });
         }
 
-        const txts = val(txt)?.records || [];
+        const txts = settled(txt)?.records || [];
         const spf = txts.find((t) => t.replace(/"/g, "").toLowerCase().startsWith("v=spf1"));
         row(els.dns, "SPF", spf ? "present" : "none");
-        const dmarcTxt = (val(dmarc)?.records || []).find((t) => /v=DMARC1/i.test(t));
+        const dmarcTxt = (settled(dmarc)?.records || []).find((t) => /v=DMARC1/i.test(t));
         row(els.dns, "DMARC", dmarcTxt ? dmarcTxt.replace(/"/g, "") : "none", !!dmarcTxt);
         if (mailServers.length && !spf) {
-          flags.push(["info", "No SPF record", "mail claiming to come from here is easier to forge."]);
+          findings.push({ level: "info", headline: "No SPF record", detail: "mail claiming to come from here is easier to forge." });
         }
         if (mailServers.length && !dmarcTxt) {
-          flags.push(["info", "No DMARC policy", "nothing tells inboxes what to do with forged mail from this domain."]);
+          findings.push({ level: "info", headline: "No DMARC policy", detail: "nothing tells inboxes what to do with forged mail from this domain." });
         }
 
-        // Hosting
         els.hosting.replaceChildren();
-        const ipv4 = val(a)?.records?.[0];
+        const ipv4 = settled(a)?.records?.[0];
         if (!ipv4) {
           row(els.hosting, "Host", "unknown — no IPv4 address to look up");
         } else {
           try {
-            const res = await fetch(`https://ipwho.is/${encodeURIComponent(ipv4)}`);
-            const info = await res.json();
+            const info = await (await fetch(`https://ipwho.is/${encodeURIComponent(ipv4)}`)).json();
             if (info && info.success) {
               row(els.hosting, "IP address", info.ip, true);
               if (info.connection?.org || info.connection?.isp) {
@@ -366,31 +206,21 @@ import { icon, renderFooter } from "../../assets/toolshed.js";
           }
         }
 
-        // Verdict
-        els.flags.replaceChildren();
-        const order = { bad: 0, warn: 1, info: 2, good: 3 };
-        flags.sort((x, y) => order[x[0]] - order[y[0]]);
-        if (!flags.length) addFlag(els.flags, "info", "Nothing notable", "no signal either way.");
-        for (const [level, headline, detail] of flags) addFlag(els.flags, level, headline, detail);
-
-        const bad = flags.filter((f) => f[0] === "bad").length;
-        const warn = flags.filter((f) => f[0] === "warn").length;
+        renderFindings(els.findings, findings);
+        const bad = countBy(findings, "bad");
+        const warn = countBy(findings, "warn");
         if (bad) {
-          setVerdict("bad", "circle-alert");
-          els.verdictTitle.textContent = "Strong warning signs";
-          els.verdictNote.textContent = "Treat anything this domain asks of you with suspicion, especially payments and passwords.";
+          renderVerdict(els.verdict, "bad", "Strong warning signs",
+            "Treat anything this domain asks of you with suspicion, especially payments and passwords.");
         } else if (warn >= 2) {
-          setVerdict("warn", "triangle-alert");
-          els.verdictTitle.textContent = "Worth a closer look";
-          els.verdictNote.textContent = "Nothing damning, but more than one thing here is unusual. Verify through a channel you already trust.";
+          renderVerdict(els.verdict, "warn", "Worth a closer look",
+            "Nothing damning, but more than one thing here is unusual. Verify through a channel you already trust.");
         } else if (warn === 1) {
-          setVerdict("warn", "triangle-alert");
-          els.verdictTitle.textContent = "Mostly ordinary, one thing to note";
-          els.verdictNote.textContent = "The single flag below may be perfectly innocent. Read it and judge.";
+          renderVerdict(els.verdict, "warn", "Mostly ordinary, one thing to note",
+            "The single flag below may be perfectly innocent. Read it and judge.");
         } else {
-          setVerdict("good", "circle-check");
-          els.verdictTitle.textContent = "Looks established";
-          els.verdictNote.textContent = "The registration and DNS record look like a domain that has been around and is properly run. That is not proof it is honest.";
+          renderVerdict(els.verdict, "good", "Looks established",
+            "The registration and DNS record look like a domain that has been around and is properly run. That is not proof it is honest.");
         }
       }
 
@@ -413,8 +243,6 @@ import { icon, renderFooter } from "../../assets/toolshed.js";
           els.go.disabled = false;
         }
       });
-
-      renderFooter();
     </script>
   </body>
 </html>
