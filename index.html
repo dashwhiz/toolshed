@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>toolshed — small developer utilities</title>
+    <meta
+      name="description"
+      content="Small developer utilities. Single static pages, no backend, everything runs in your browser."
+    />
+    <style>
+      :root {
+        --bg: #08080a;
+        --fg: #f2f2f0;
+        --muted: #93939c;
+        --line: rgba(255, 255, 255, 0.08);
+        --accent: #3ddc84;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 5rem 1.5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main { max-width: 46rem; margin: 0 auto; }
+      h1 { font-size: 2rem; letter-spacing: -0.02em; margin: 0; }
+      .lede { color: var(--muted); max-width: 34rem; }
+      .label {
+        font: 0.7rem/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 3.5rem 0 1.25rem;
+      }
+      ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
+      @media (min-width: 40rem) { ul { grid-template-columns: 1fr 1fr; } }
+      li a {
+        display: block;
+        padding: 1rem 1.1rem;
+        border: 1px solid var(--line);
+        border-radius: 0.6rem;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 160ms ease, background-color 160ms ease;
+      }
+      li a:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: rgba(255, 255, 255, 0.03); }
+      li strong { display: block; font-weight: 500; }
+      li span { color: var(--muted); font-size: 0.875rem; }
+      .empty { color: var(--muted); font-size: 0.9rem; }
+      footer { margin-top: 5rem; color: var(--muted); font-size: 0.85rem; }
+      footer a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>toolshed</h1>
+      <p class="lede">
+        Small developer utilities. Each one is a single static page — no backend, no accounts,
+        nothing leaves your browser.
+      </p>
+
+      <p class="label">Tools</p>
+      <!-- Each shipped tool gets an <li> here. -->
+      <ul id="tools"></ul>
+      <p class="empty" id="empty">Nothing shipped yet. First one lands soon.</p>
+
+      <footer>
+        <a href="https://github.com/dashwhiz/toolshed">Source</a> ·
+        built by <a href="https://alekvel.dev">Aleksandar Velichkovikj</a>
+      </footer>
+    </main>
+
+    <script>
+      // Shipped tools are appended here as they land.
+      const TOOLS = [];
+
+      const list = document.getElementById("tools");
+      const empty = document.getElementById("empty");
+
+      for (const tool of TOOLS) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = `tools/${tool.slug}/`;
+        a.innerHTML = `<strong></strong><span></span>`;
+        a.querySelector("strong").textContent = tool.name;
+        a.querySelector("span").textContent = tool.blurb;
+        li.append(a);
+        list.append(li);
+      }
+
+      empty.hidden = TOOLS.length > 0;
+    </script>
+  </body>
+</html>
