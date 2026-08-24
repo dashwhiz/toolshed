@@ -32,7 +32,7 @@ function link(href, text) {
 function separator() {
   const span = document.createElement("span");
   span.className = "sep";
-  span.textContent = "/";
+  span.textContent = "·";
   return span;
 }
 
@@ -46,21 +46,12 @@ export function renderFooter() {
   // Deep links (a bookmark, a shared URL) have no history to go back to, so every page
   // below the root carries the wordmark home. Set data-home on <body> to switch it on.
   const home = document.body.dataset.home;
-  if (home) footer.append(link(home, "toolshed"), separator());
-
-  const built = document.createElement("span");
-  built.append("built by ", link("https://alekvel.dev", "Aleksandar Velichkovikj"));
-
-  const privacy = document.createElement("span");
-  privacy.className = "privacy";
-  privacy.textContent =
-    document.body.dataset.privacy || "No accounts, no keys, nothing stored.";
+  if (home) footer.append(link(home, "Toolshed"), separator());
 
   footer.append(
     link("https://github.com/dashwhiz/toolshed", "Source"),
     separator(),
-    built,
-    privacy,
+    link("https://alekvel.dev", "Aleksandar Velichkovikj"),
   );
   document.body.append(footer);
 }

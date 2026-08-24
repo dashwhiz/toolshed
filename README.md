@@ -1,4 +1,4 @@
-# toolshed
+# Toolshed
 
 Small developer utilities. Each one is a single static page — no build step, no backend,
 no API keys, no accounts. Everything runs in your browser.

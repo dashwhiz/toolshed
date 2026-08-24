@@ -47,10 +47,12 @@ Tones map to meaning, not decoration: `good` (accent), `warn`, `bad`, `info` (mu
 renders the footer. A page must not restate either — if a page needs a style that another
 page will also need, it belongs in the stylesheet.
 
+The footer is `Toolshed · Source · Aleksandar Velichkovikj` and nothing more — do not add a
+privacy note there, it belongs in the page body where it is read.
+
 Every page ends with the shared footer via `renderFooter()`, which appends it to `<body>` as
 a sibling of `<main>` — the sticky-footer layout depends on that, so do not nest it inside
-`<main>`. Set `data-privacy` on `<body>` to change the right-hand note; omit it for the
-default. Short pages push the footer to the bottom of the viewport; long pages let it flow
+`<main>`. Short pages push the footer to the bottom of the viewport; long pages let it flow
 below the content. It is never `position: fixed` — it must not overlay scrolling results.
 
 ## Structure of a tool page

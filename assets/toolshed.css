@@ -229,13 +229,11 @@ dd.data { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
   border-top: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 0.75rem;
+  gap: 0.35rem 0.65rem;
   align-items: baseline;
   color: var(--muted);
   font-size: 0.85rem;
 }
 .site-footer .sep { color: var(--line-strong); }
-.site-footer .privacy { margin-left: auto; }
-@media (max-width: 34rem) { .site-footer .privacy { margin-left: 0; flex-basis: 100%; } }
 
 [hidden] { display: none !important; }
