@@ -34,23 +34,35 @@
         letter-spacing: 0.18em;
         text-transform: uppercase;
         color: var(--muted);
-        margin: 3.5rem 0 1.25rem;
+        margin: 3.5rem 0 0.5rem;
       }
+      .label-note { color: var(--muted); font-size: 0.85rem; margin: 0 0 1.25rem; }
       ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
       @media (min-width: 40rem) { ul { grid-template-columns: 1fr 1fr; } }
-      li a {
+      li > * {
         display: block;
+        height: 100%;
         padding: 1rem 1.1rem;
         border: 1px solid var(--line);
         border-radius: 0.6rem;
         text-decoration: none;
         color: inherit;
-        transition: border-color 160ms ease, background-color 160ms ease;
       }
+      li a { transition: border-color 160ms ease, background-color 160ms ease; }
       li a:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: rgba(255, 255, 255, 0.03); }
+      li a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      li div { border-style: dashed; opacity: 0.55; }
       li strong { display: block; font-weight: 500; }
       li span { color: var(--muted); font-size: 0.875rem; }
-      .empty { color: var(--muted); font-size: 0.9rem; }
+      li em {
+        float: right;
+        font: 0.65rem/1.6 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-style: normal;
+        color: var(--muted);
+      }
+      li a em { color: var(--accent); }
       footer { margin-top: 5rem; color: var(--muted); font-size: 0.85rem; }
       footer a { color: var(--accent); }
     </style>
@@ -59,14 +71,11 @@
     <main>
       <h1>toolshed</h1>
       <p class="lede">
-        Small developer utilities. Each one is a single static page — no backend, no accounts,
-        nothing leaves your browser.
+        One place to answer “is this real, and what is it?” — without googling a tool, finding a
+        site, and pasting your URL into it. Nothing you paste leaves your browser.
       </p>
 
-      <p class="label">Tools</p>
-      <!-- Each shipped tool gets an <li> here. -->
-      <ul id="tools"></ul>
-      <p class="empty" id="empty">Nothing shipped yet. First one lands soon.</p>
+      <div id="groups"></div>
 
       <footer>
         <a href="https://github.com/dashwhiz/toolshed">Source</a> ·
@@ -75,24 +84,78 @@
     </main>
 
     <script>
-      // Shipped tools are appended here as they land.
-      const TOOLS = [];
+      // Mirrors ROADMAP.md. Flip `built` to true when a tool ships.
+      const GROUPS = [
+        {
+          name: "Check something out there",
+          note: "Looks things up over the network. No keys, no accounts.",
+          tools: [
+            { slug: "site-check", name: "Website trust check", blurb: "Domain age, registrar, DNS and host — with the red flags named", built: false },
+            { slug: "dns", name: "DNS records", blurb: "A, MX, NS, TXT, CAA over DNS-over-HTTPS", built: false },
+            { slug: "email-auth", name: "Email spoofability", blurb: "SPF, DMARC and DKIM — can mail be forged from this domain?", built: false },
+            { slug: "ip", name: "IP & ASN lookup", blurb: "Who owns this address, and where does it sit?", built: false },
+          ],
+        },
+        {
+          name: "Inspect something you were sent",
+          note: "Fully offline. Nothing is uploaded, ever.",
+          tools: [
+            { slug: "link", name: "Link inspector", blurb: "Homograph domains, wrapped safelinks, tracking params", built: false },
+            { slug: "unicode", name: "Hidden characters", blurb: "Zero-width, homoglyphs, smart quotes, non-breaking spaces", built: false },
+            { slug: "jwt", name: "JWT decoder", blurb: "Decode a token without pasting it into a website", built: false },
+            { slug: "cert", name: "Certificate decoder", blurb: "Issuer, subject, SANs and validity from a PEM", built: false },
+          ],
+        },
+        {
+          name: "Everyday utilities",
+          tools: [
+            { slug: "timestamp", name: "Timestamp converter", blurb: "Epoch ⇄ human, timezone aware", built: false },
+            { slug: "ids", name: "ID generator", blurb: "UUID v4, ULID, nanoid — in bulk", built: false },
+            { slug: "hash", name: "Hash generator", blurb: "SHA-1, SHA-256, SHA-512 via WebCrypto", built: false },
+            { slug: "encode", name: "Encode/decode bench", blurb: "Base64, URL and HTML entities", built: false },
+            { slug: "text", name: "Text bench", blurb: "Case convert, sort, dedupe, trim, count", built: false },
+            { slug: "contrast", name: "Colour contrast", blurb: "WCAG AA/AAA, with the nearest passing shade", built: false },
+            { slug: "cron", name: "Cron explainer", blurb: "Plain English, plus the next five run times", built: false },
+          ],
+        },
+      ];
 
-      const list = document.getElementById("tools");
-      const empty = document.getElementById("empty");
+      const groups = document.getElementById("groups");
 
-      for (const tool of TOOLS) {
-        const li = document.createElement("li");
-        const a = document.createElement("a");
-        a.href = `tools/${tool.slug}/`;
-        a.innerHTML = `<strong></strong><span></span>`;
-        a.querySelector("strong").textContent = tool.name;
-        a.querySelector("span").textContent = tool.blurb;
-        li.append(a);
-        list.append(li);
+      for (const group of GROUPS) {
+        const heading = document.createElement("p");
+        heading.className = "label";
+        heading.textContent = group.name;
+        groups.append(heading);
+
+        if (group.note) {
+          const note = document.createElement("p");
+          note.className = "label-note";
+          note.textContent = group.note;
+          groups.append(note);
+        }
+
+        const list = document.createElement("ul");
+        for (const tool of group.tools) {
+          const card = document.createElement(tool.built ? "a" : "div");
+          if (tool.built) card.href = `tools/${tool.slug}/`;
+
+          const status = document.createElement("em");
+          status.textContent = tool.built ? "open" : "soon";
+
+          const name = document.createElement("strong");
+          name.textContent = tool.name;
+
+          const blurb = document.createElement("span");
+          blurb.textContent = tool.blurb;
+
+          card.append(status, name, blurb);
+          const li = document.createElement("li");
+          li.append(card);
+          list.append(li);
+        }
+        groups.append(list);
       }
-
-      empty.hidden = TOOLS.length > 0;
     </script>
   </body>
 </html>
