@@ -34,7 +34,7 @@ Fully offline. Nothing leaves the browser — say so on every page.
 | Hidden characters | `unicode` | shipped | Zero-width, homoglyphs, smart quotes, NBSP — catches phishing and broken code |
 | JWT decoder | `jwt` | idea | Decode only, never leaves the browser |
 | Certificate decoder | `cert` | idea | Paste PEM → issuer, subject, SANs, validity |
-| Prompt injection scan | `injection-scan` | idea | Paste content an agent is about to read. See the note below before building |
+| Prompt injection scan | `injection-scan` | shipped | Paste content an agent is about to read. See the note below before building |
 
 ### On the injection scan
 
