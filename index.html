@@ -8,6 +8,7 @@
       name="description"
       content="Small developer utilities. Single static pages, no backend, everything runs in your browser."
     />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/toolshed.css" />
   </head>
   <body>
@@ -43,6 +44,7 @@
             { slug: "unicode", name: "Hidden characters", blurb: "Zero-width, homoglyphs, smart quotes, non-breaking spaces", built: false },
             { slug: "jwt", name: "JWT decoder", blurb: "Decode a token without pasting it into a website", built: false },
             { slug: "cert", name: "Certificate decoder", blurb: "Issuer, subject, SANs and validity from a PEM", built: false },
+            { slug: "injection-scan", name: "Prompt injection scan", blurb: "Hidden text and buried instructions, before you point an agent at it", built: false },
           ],
         },
         {
@@ -82,22 +84,25 @@
           card.className = tool.built ? "card" : "card card--pending";
           if (tool.built) card.href = `tools/${tool.slug}/`;
 
-          const top = document.createElement("span");
-          top.className = "card-top";
-          const state = document.createElement("span");
-          state.className = "card-state";
-          state.textContent = tool.built ? "open" : "soon";
-          top.append(state, icon(tool.built ? "arrow-right" : "clock"));
-
           const name = document.createElement("strong");
           name.className = "card-name";
           name.textContent = tool.name;
+
+          const state = document.createElement("span");
+          state.className = "card-state";
+          state.textContent = tool.built ? "open" : "soon";
+          // Only a tool you can actually open earns an icon; fifteen clocks is noise.
+          if (tool.built) state.append(icon("arrow-right"));
+
+          const head = document.createElement("span");
+          head.className = "card-head";
+          head.append(name, state);
 
           const blurb = document.createElement("span");
           blurb.className = "card-blurb";
           blurb.textContent = tool.blurb;
 
-          card.append(top, name, blurb);
+          card.append(head, blurb);
           const li = document.createElement("li");
           li.append(card);
           list.append(li);

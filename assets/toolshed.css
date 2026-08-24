@@ -12,7 +12,7 @@
   /* The only background colour in the project. Depth comes from borders, never fills. */
   --bg: #08080a;
   --fg: #f2f2f0;
-  --muted: #92929b;
+  --muted: #9a9aa4;
   --line: #1e1e24;
   --line-strong: #2e2e37;
   --accent: #3ddc84;
@@ -44,13 +44,19 @@ main { flex: 1 0 auto; width: 100%; max-width: 46rem; margin: 0 auto; }
 a { color: var(--accent); }
 
 h1 {
-  font-size: 1.875rem;
+  font-size: 2.25rem;
   font-weight: 500;
-  letter-spacing: -0.02em;
-  margin: 0 0 0.5rem;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.75rem;
 }
 
-.lede { color: var(--muted); max-width: 36rem; margin: 0; }
+.lede {
+  color: var(--muted);
+  max-width: 34rem;
+  margin: 0;
+  font-size: 1.0625rem;
+  line-height: 1.65;
+}
 
 .label {
   font-size: 0.7rem;
@@ -59,7 +65,7 @@ h1 {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
-  margin: 3rem 0 1rem;
+  margin: 3.5rem 0 1rem;
 }
 .label + .label-note { margin: -0.6rem 0 1rem; color: var(--muted); font-size: 0.85rem; }
 
@@ -83,37 +89,53 @@ h1 {
 
 /* Cards ------------------------------------------------------------------ */
 
-.grid { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
+.grid { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.875rem; }
 @media (min-width: 40rem) { .grid { grid-template-columns: 1fr 1fr; } }
 
 .card {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
   height: 100%;
-  padding: 1rem 1.1rem;
+  padding: 1.15rem 1.25rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   text-decoration: none;
   color: inherit;
   background: none;
 }
-a.card { transition: border-color 160ms ease; }
+/* A tool you can open reads as solid and slightly brighter-edged; one that is not
+   yet built stays dashed and recedes. */
+a.card { border-color: var(--line-strong); transition: border-color 160ms ease; }
 a.card:hover { border-color: var(--accent); }
+a.card:hover .card-state .icon { transform: translateX(2px); }
 a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.card--pending { border-style: dashed; color: var(--muted); }
-.card--pending .card-name { color: var(--muted); }
+.card--pending { border-style: dashed; }
 
-.card-top { display: flex; align-items: center; gap: 0.4rem; float: right; }
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.card-name { font-size: 1.0625rem; font-weight: 500; letter-spacing: -0.01em; }
+.card--pending .card-name { color: var(--muted); font-weight: 400; }
+
 .card-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.65rem;
   font-weight: 500;
-  line-height: 1.6;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
 a.card .card-state { color: var(--accent); }
-.card-name { display: block; font-weight: 500; }
-.card-blurb { color: var(--muted); font-size: 0.875rem; }
+.card-state .icon { width: 0.85rem; height: 0.85rem; transition: transform 160ms ease; }
+
+.card-blurb { color: var(--muted); font-size: 0.875rem; line-height: 1.5; }
 
 /* Forms ------------------------------------------------------------------ */
 
