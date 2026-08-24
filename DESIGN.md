@@ -50,6 +50,10 @@ page will also need, it belongs in the stylesheet.
 The footer is `Toolshed · Source · Aleksandar Velichkovikj` and nothing more — do not add a
 privacy note there, it belongs in the page body where it is read.
 
+It follows the portfolio's footer: centered, generous padding above a `--line` rule, 0.75rem
+muted text, links underlined at a 4px offset that lift to `--fg` on hover, `·` separators in
+`--line-strong`. Footer links are never accent green — the accent is for things you act on.
+
 Every page ends with the shared footer via `renderFooter()`, which appends it to `<body>` as
 a sibling of `<main>` — the sticky-footer layout depends on that, so do not nest it inside
 `<main>`. Short pages push the footer to the bottom of the viewport; long pages let it flow

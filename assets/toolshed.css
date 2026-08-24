@@ -224,16 +224,24 @@ dd.data { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
   flex: none;
   width: 100%;
   max-width: 46rem;
-  margin: 3rem auto 0;
-  padding-top: 1.5rem;
+  margin: 4rem auto 0;
+  padding-top: 4rem;
   border-top: 1px solid var(--line);
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 0.65rem;
-  align-items: baseline;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.75rem;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
 }
+/* Quiet by default, lifts to full contrast on hover — matches the portfolio footer. */
+.site-footer a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.site-footer a:hover { color: var(--fg); }
 .site-footer .sep { color: var(--line-strong); }
 
 [hidden] { display: none !important; }
