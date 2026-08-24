@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DNS records — Toolshed</title>
+    <meta
+      name="description"
+      content="Look up A, AAAA, MX, NS, TXT, CAA and SOA records for a domain over DNS-over-HTTPS. No account, no key."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main>
+      <h1>DNS records</h1>
+      <p class="lede">
+        Every record a domain publishes, in one lookup — addresses, mail servers, nameservers,
+        text records and certificate authority policy.
+      </p>
+
+      <form id="form">
+        <input
+          id="input"
+          type="text"
+          placeholder="example.com"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Domain to look up"
+        />
+        <button id="go" type="submit">Look up</button>
+      </form>
+      <p class="note" id="status">Resolved over DNS-over-HTTPS. No account, no key, nothing stored.</p>
+
+      <div id="results" hidden>
+        <p class="label">Records</p>
+        <dl id="records"></dl>
+
+        <p class="label">Notes</p>
+        <ul class="findings" id="findings"></ul>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>This is one resolver's answer, cached. Another resolver, or the domain's own nameservers, may say something different — and a recent change may not have propagated.</li>
+          <li>Absent records are not proof of absence: a resolver can fail or truncate, and this reports what came back.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings } from "../../assets/toolshed.js";
+      import { parseHost, dns } from "../../assets/domain.js";
+
+      const TYPES = [
+        ["A", "IPv4 address"],
+        ["AAAA", "IPv6 address"],
+        ["MX", "Mail servers"],
+        ["NS", "Nameservers"],
+        ["TXT", "Text records"],
+        ["CAA", "Certificate authorities"],
+        ["SOA", "Zone authority"],
+      ];
+
+      const els = {
+        form: document.getElementById("form"),
+        input: document.getElementById("input"),
+        go: document.getElementById("go"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        records: document.getElementById("records"),
+        findings: document.getElementById("findings"),
+      };
+
+      async function lookup(host) {
+        const settled = await Promise.allSettled(TYPES.map(([type]) => dns(host, type)));
+        const findings = [];
+        let found = 0;
+
+        els.records.replaceChildren();
+        settled.forEach((result, i) => {
+          const [type, label] = TYPES[i];
+          if (result.status === "rejected") {
+            row(els.records, `${type} — ${label}`, "lookup failed: " + result.reason.message);
+            return;
+          }
+          const records = result.value.records;
+          if (records.length) found += records.length;
+          row(els.records, `${type} — ${label}`, records.length ? records.join("\n") : "none", true);
+        });
+
+        const a = settled[0].status === "fulfilled" ? settled[0].value : null;
+        const mx = settled[2].status === "fulfilled" ? settled[2].value.records : [];
+        const ns = settled[3].status === "fulfilled" ? settled[3].value.records : [];
+        const txt = settled[4].status === "fulfilled" ? settled[4].value.records : [];
+        const caa = settled[5].status === "fulfilled" ? settled[5].value.records : [];
+
+        if (a?.nxdomain) {
+          findings.push({ level: "bad", headline: "Domain does not exist", detail: "the resolver returned NXDOMAIN." });
+        }
+        if (!ns.length) {
+          findings.push({ level: "warn", headline: "No nameservers returned", detail: "unusual for a delegated domain — this may be a subdomain rather than a zone." });
+        }
+        if (!mx.length) {
+          findings.push({ level: "info", headline: "No mail servers", detail: "this name cannot receive email." });
+        }
+        const spf = txt.find((t) => t.replace(/"/g, "").toLowerCase().startsWith("v=spf1"));
+        if (txt.length && !spf) {
+          findings.push({ level: "info", headline: "Text records but no SPF", detail: "nothing declares which servers may send mail as this domain." });
+        }
+        if (!caa.length) {
+          findings.push({ level: "info", headline: "No CAA record", detail: "any certificate authority may issue certificates for this domain." });
+        }
+        renderFindings(els.findings, findings);
+        return found;
+      }
+
+      els.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const host = parseHost(els.input.value);
+        if (!host) {
+          els.status.textContent = "That does not look like a domain. Try example.com.";
+          return;
+        }
+        els.go.disabled = true;
+        els.status.textContent = `Looking up ${host}…`;
+        try {
+          const found = await lookup(host);
+          els.results.hidden = false;
+          els.status.textContent = `${found} record${found === 1 ? "" : "s"} for ${host}, from one resolver.`;
+        } catch (err) {
+          els.status.textContent = "Lookup failed — " + err.message;
+        } finally {
+          els.go.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

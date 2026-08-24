@@ -223,7 +223,7 @@ dl {
   dd { margin-bottom: 0.6rem; }
 }
 dt { color: var(--muted); }
-dd { margin: 0; overflow-wrap: anywhere; }
+dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
 dd.data { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
 
 /* Findings ---------------------------------------------------------------- */

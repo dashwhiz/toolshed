@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Email spoofability — Toolshed</title>
+    <meta
+      name="description"
+      content="Check whether someone can forge email from a domain: SPF, DKIM and DMARC policy, read in plain English."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main>
+      <h1>Email spoofability</h1>
+      <p class="lede">
+        If a stranger sent mail claiming to be from this domain, would an inbox reject it?
+        Reads the domain's SPF, DKIM and DMARC records and says what they actually enforce.
+      </p>
+
+      <form id="form">
+        <input
+          id="input"
+          type="text"
+          placeholder="example.com or someone@example.com"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Domain or email address to check"
+        />
+        <button id="go" type="submit">Check</button>
+      </form>
+      <p class="note" id="status">Reads public DNS records. No account, no key, nothing stored.</p>
+
+      <div id="results" hidden>
+        <div class="verdict" id="verdict"></div>
+
+        <p class="label">What stood out</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Records</p>
+        <dl id="records"></dl>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>DKIM selectors cannot be listed from DNS. This probes common ones, so "none found" means these names were absent — not that DKIM is unused.</li>
+          <li>A strict policy is what the domain asks for. Whether a receiving server honours it is up to that server.</li>
+          <li>This says nothing about whether a specific message was genuine. It describes the domain's policy, not a message.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderVerdict, renderFindings } from "../../assets/toolshed.js";
+      import { parseHost, dns } from "../../assets/domain.js";
+
+      // DNS gives no way to enumerate selectors, so probe the ones the big providers use.
+      const SELECTORS = [
+        "google", "selector1", "selector2", "k1", "k2", "default", "dkim", "mail",
+        "s1", "s2", "mandrill", "zoho", "protonmail", "fm1", "sendgrid", "mailjet", "amazonses",
+      ];
+
+      const els = {
+        form: document.getElementById("form"),
+        input: document.getElementById("input"),
+        go: document.getElementById("go"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        findings: document.getElementById("findings"),
+        records: document.getElementById("records"),
+      };
+
+      const clean = (t) => t.replace(/^"|"$/g, "").replace(/" "/g, "");
+
+      function readSpf(record) {
+        const all = record.match(/([-~?+])all\b/);
+        const qualifier = all ? all[1] : null;
+        const lookups = (record.match(/\b(include|a|mx|ptr|exists|redirect):?/g) || []).length;
+        return { qualifier, lookups };
+      }
+
+      function readDmarc(record) {
+        const get = (key) => (record.match(new RegExp(`\\b${key}\\s*=\\s*([^;\\s]+)`, "i")) || [])[1];
+        return { p: get("p"), sp: get("sp"), pct: get("pct"), rua: get("rua") };
+      }
+
+      async function check(host) {
+        const findings = [];
+        const [mxRes, txtRes, dmarcRes] = await Promise.allSettled([
+          dns(host, "MX"),
+          dns(host, "TXT"),
+          dns("_dmarc." + host, "TXT"),
+        ]);
+        const settled = (r) => (r.status === "fulfilled" ? r.value : null);
+
+        const mx = settled(mxRes)?.records || [];
+        const txt = (settled(txtRes)?.records || []).map(clean);
+        const spfRecord = txt.find((t) => t.toLowerCase().startsWith("v=spf1"));
+        const dmarcRecord = (settled(dmarcRes)?.records || []).map(clean).find((t) => /^v=DMARC1/i.test(t));
+
+        els.records.replaceChildren();
+        row(els.records, "Domain", host, true);
+        row(els.records, "Mail servers", mx.length ? mx.join("\n") : "none", true);
+        row(els.records, "SPF", spfRecord || "none", true);
+        row(els.records, "DMARC", dmarcRecord || "none", true);
+
+        // SPF
+        if (!spfRecord) {
+          findings.push({ level: "bad", headline: "No SPF record", detail: "nothing declares which servers may send mail as this domain." });
+        } else {
+          const { qualifier, lookups } = readSpf(spfRecord);
+          if (qualifier === "+") {
+            findings.push({ level: "bad", headline: "SPF allows anyone", detail: "the record ends in +all, which authorises every server on the internet." });
+          } else if (qualifier === "-") {
+            findings.push({ level: "good", headline: "SPF ends in -all", detail: "mail from anywhere else is a hard fail." });
+          } else if (qualifier === "~") {
+            findings.push({ level: "info", headline: "SPF ends in ~all", detail: "a soft fail — unlisted senders are marked, not rejected." });
+          } else if (qualifier === "?") {
+            findings.push({ level: "warn", headline: "SPF ends in ?all", detail: "neutral, which enforces nothing at all." });
+          } else {
+            findings.push({ level: "warn", headline: "SPF has no all mechanism", detail: "without a closing all, the record does not say what to do with unlisted senders." });
+          }
+          if (lookups > 10) {
+            findings.push({ level: "warn", headline: `SPF may exceed the lookup limit (${lookups})`, detail: "SPF permits ten DNS lookups; beyond that receivers may treat the record as broken." });
+          }
+        }
+
+        // DMARC
+        if (!dmarcRecord) {
+          findings.push({ level: "bad", headline: "No DMARC policy", detail: "nothing tells inboxes what to do with mail that fails these checks. SPF alone is weak." });
+        } else {
+          const { p, pct, rua } = readDmarc(dmarcRecord);
+          if (p === "reject") {
+            findings.push({ level: "good", headline: "DMARC policy is reject", detail: "forged mail should be refused outright." });
+          } else if (p === "quarantine") {
+            findings.push({ level: "info", headline: "DMARC policy is quarantine", detail: "forged mail should land in spam rather than be refused." });
+          } else if (p === "none") {
+            findings.push({ level: "warn", headline: "DMARC policy is none", detail: "monitoring only. Failures are reported but nothing is blocked." });
+          }
+          if (pct && pct !== "100") {
+            findings.push({ level: "warn", headline: `DMARC applies to only ${pct}% of mail`, detail: "the rest is delivered without the policy." });
+          }
+          if (!rua) {
+            findings.push({ level: "info", headline: "DMARC has no reporting address", detail: "no rua tag, so nobody receives failure reports." });
+          }
+        }
+
+        // DKIM
+        const probes = await Promise.allSettled(
+          SELECTORS.map((s) => dns(`${s}._domainkey.${host}`, "TXT")),
+        );
+        // A DKIM record with an empty p= is a revoked key, not a published one — the
+        // convention for "nothing may sign as this selector". Treat the two separately.
+        const published = [];
+        const revoked = [];
+        SELECTORS.forEach((selector, i) => {
+          const r = probes[i];
+          if (r.status !== "fulfilled") return;
+          for (const record of r.value.records) {
+            if (!/v=DKIM1/i.test(record)) continue;
+            const key = (record.match(/\bp\s*=\s*([A-Za-z0-9+/=]*)/i) || [])[1] || "";
+            (key.length > 20 ? published : revoked).push(selector);
+            break;
+          }
+        });
+
+        const summary = [];
+        if (published.length) summary.push(`published: ${published.join(", ")}`);
+        if (revoked.length) summary.push(`revoked: ${revoked.length === SELECTORS.length ? "all probed names" : revoked.join(", ")}`);
+        row(els.records, "DKIM selectors", summary.length ? summary.join("\n") : "none of the common names", true);
+
+        if (published.length) {
+          findings.push({ level: "good", headline: `DKIM key published (${published.join(", ")})`, detail: "mail from this domain can be cryptographically signed." });
+        } else if (revoked.length) {
+          findings.push({ level: "good", headline: "DKIM keys explicitly revoked", detail: "the domain publishes empty keys, which tells receivers that nothing may sign as it. A deliberate lock-down." });
+        } else {
+          findings.push({ level: "info", headline: "No DKIM key at the common selector names", detail: "selectors cannot be listed from DNS, so this is not proof DKIM is missing." });
+        }
+
+        if (!mx.length) {
+          findings.push({ level: "info", headline: "Receives no mail", detail: "no MX record. The domain can still be forged as a sender." });
+        }
+
+        renderFindings(els.findings, findings);
+
+        const dmarcPolicy = dmarcRecord ? readDmarc(dmarcRecord).p : null;
+        const spfStrict = spfRecord && ["-", "~"].includes(readSpf(spfRecord).qualifier);
+        if (!spfRecord && !dmarcRecord) {
+          renderVerdict(els.verdict, "bad", "Anyone can forge mail from this domain",
+            "Neither SPF nor DMARC is published, so a receiving server has nothing to check a sender against.");
+        } else if (dmarcPolicy === "reject" && spfStrict) {
+          renderVerdict(els.verdict, "good", "Well defended",
+            "SPF restricts who may send and DMARC asks receivers to reject anything that fails. About as good as this gets.");
+        } else if (dmarcPolicy === "reject" || dmarcPolicy === "quarantine") {
+          renderVerdict(els.verdict, "warn", "Partly defended",
+            "There is an enforcing DMARC policy, but the records below have gaps worth closing.");
+        } else {
+          renderVerdict(els.verdict, "warn", "Weakly defended",
+            "Records exist but nothing is being enforced, so forged mail is likely to be delivered.");
+        }
+      }
+
+      els.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const raw = els.input.value.includes("@") ? els.input.value.split("@").pop() : els.input.value;
+        const host = parseHost(raw);
+        if (!host) {
+          els.status.textContent = "That does not look like a domain. Try example.com.";
+          return;
+        }
+        els.go.disabled = true;
+        els.status.textContent = `Checking ${host}…`;
+        try {
+          await check(host);
+          els.results.hidden = false;
+          els.status.textContent = `Checked ${host}. Public DNS records only.`;
+        } catch (err) {
+          els.status.textContent = "Could not complete the check — " + err.message;
+        } finally {
+          els.go.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
