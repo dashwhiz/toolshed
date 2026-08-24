@@ -2,7 +2,8 @@
 
 Source of truth for what gets built next. Statuses: `idea` → `building` → `shipped` → `on-portfolio`.
 
-Every tool is a single static page: no build step, no backend, no API keys, no accounts.
+Every tool is a single static page plus the shared `assets/`: no build step, no backend,
+no API keys, no accounts. Look and behaviour are governed by [`DESIGN.md`](DESIGN.md).
 Live at `https://dashwhiz.github.io/toolshed/tools/<slug>/`.
 
 ## What this is for
@@ -74,5 +75,6 @@ Cut deliberately. Recorded so they don't get re-added by accident.
 
 - One commit per meaningful increment. Never pad, never split a change to raise the count, never commit empty.
 - Verify a tool works in the browser before marking it `shipped`.
+- Follow [`DESIGN.md`](DESIGN.md). No emoji, no in-page nav, one background colour.
 - Shipped tools get an entry in the `TOOLS` array in `index.html`.
 - When a tool ships, add it to `shipped` in the portfolio's `content/profile.ts` and push that repo too, then mark the row `on-portfolio`.

@@ -1,0 +1,219 @@
+/* Shared across every page. See DESIGN.md before changing anything here. */
+
+@font-face {
+  font-family: "Roboto";
+  src: url("fonts/roboto-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* The only background colour in the project. Depth comes from borders, never fills. */
+  --bg: #08080a;
+  --fg: #f2f2f0;
+  --muted: #92929b;
+  --line: #1e1e24;
+  --line-strong: #2e2e37;
+  --accent: #3ddc84;
+  --warn: #f0b429;
+  --bad: #f2616b;
+  --radius: 0.6rem;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 4.5rem 1.5rem;
+  /* Sticky footer: short pages still push it to the bottom of the viewport. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+main { flex: 1 0 auto; width: 100%; max-width: 46rem; margin: 0 auto; }
+
+a { color: var(--accent); }
+
+h1 {
+  font-size: 1.875rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+}
+
+.lede { color: var(--muted); max-width: 36rem; margin: 0; }
+
+.label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 3rem 0 1rem;
+}
+.label + .label-note { margin: -0.6rem 0 1rem; color: var(--muted); font-size: 0.85rem; }
+
+/* Icons ------------------------------------------------------------------ */
+/* Lucide (ISC). Injected by assets/icons.js — never use an emoji instead. */
+
+.icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-good { color: var(--accent); }
+.icon-warn { color: var(--warn); }
+.icon-bad { color: var(--bad); }
+.icon-info { color: var(--muted); }
+
+/* Cards ------------------------------------------------------------------ */
+
+.grid { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
+@media (min-width: 40rem) { .grid { grid-template-columns: 1fr 1fr; } }
+
+.card {
+  display: block;
+  height: 100%;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+  background: none;
+}
+a.card { transition: border-color 160ms ease; }
+a.card:hover { border-color: var(--accent); }
+a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card--pending { border-style: dashed; color: var(--muted); }
+.card--pending .card-name { color: var(--muted); }
+
+.card-top { display: flex; align-items: center; gap: 0.4rem; float: right; }
+.card-state {
+  font-size: 0.65rem;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+a.card .card-state { color: var(--accent); }
+.card-name { display: block; font-weight: 500; }
+.card-blurb { color: var(--muted); font-size: 0.875rem; }
+
+/* Forms ------------------------------------------------------------------ */
+
+form { display: flex; gap: 0.5rem; margin: 2rem 0 0; flex-wrap: wrap; }
+
+input[type="text"] {
+  flex: 1 1 18rem;
+  padding: 0.8rem 1rem;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+}
+input[type="text"]::placeholder { color: var(--muted); }
+input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+button {
+  padding: 0.8rem 1.4rem;
+  background: var(--accent);
+  color: #06210f;
+  border: 0;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+
+.note { color: var(--muted); font-size: 0.8rem; margin-top: 0.75rem; }
+
+/* Data -------------------------------------------------------------------- */
+
+dl {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  font-size: 0.925rem;
+}
+@media (max-width: 34rem) {
+  dl { grid-template-columns: 1fr; gap: 0.15rem; }
+  dd { margin-bottom: 0.6rem; }
+}
+dt { color: var(--muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+dd.data { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+
+/* Findings ---------------------------------------------------------------- */
+
+.findings { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem; }
+.finding { display: flex; gap: 0.7rem; align-items: flex-start; font-size: 0.925rem; }
+.finding .icon { margin-top: 0.2rem; }
+.finding span { color: var(--muted); }
+.finding b { font-weight: 500; color: var(--fg); }
+
+.verdict {
+  display: flex;
+  gap: 0.9rem;
+  margin: 2.25rem 0 0;
+  padding: 1.15rem 1.3rem;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+}
+.verdict .icon { width: 1.3rem; height: 1.3rem; margin-top: 0.15rem; }
+.verdict h2 { margin: 0; font-size: 1.1rem; font-weight: 500; }
+.verdict p { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.verdict--good { border-left-color: var(--accent); }
+.verdict--warn { border-left-color: var(--warn); }
+.verdict--bad { border-left-color: var(--bad); }
+
+/* Caveats and footer ------------------------------------------------------ */
+
+.caveats {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.caveats strong { color: var(--fg); font-weight: 500; }
+.caveats ul { margin: 0.5rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.25rem; }
+
+.site-footer {
+  flex: none;
+  width: 100%;
+  max-width: 46rem;
+  margin: 3rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.site-footer .sep { color: var(--line-strong); }
+.site-footer .privacy { margin-left: auto; }
+@media (max-width: 34rem) { .site-footer .privacy { margin-left: 0; flex-basis: 100%; } }
+
+[hidden] { display: none !important; }

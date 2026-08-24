@@ -8,64 +8,7 @@
       name="description"
       content="Small developer utilities. Single static pages, no backend, everything runs in your browser."
     />
-    <style>
-      :root {
-        --bg: #08080a;
-        --fg: #f2f2f0;
-        --muted: #93939c;
-        --line: rgba(255, 255, 255, 0.08);
-        --accent: #3ddc84;
-        color-scheme: dark;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        padding: 5rem 1.5rem;
-        background: var(--bg);
-        color: var(--fg);
-        font: 16px/1.6 ui-sans-serif, system-ui, sans-serif;
-        -webkit-font-smoothing: antialiased;
-      }
-      main { max-width: 46rem; margin: 0 auto; }
-      h1 { font-size: 2rem; letter-spacing: -0.02em; margin: 0; }
-      .lede { color: var(--muted); max-width: 34rem; }
-      .label {
-        font: 0.7rem/1 ui-monospace, Menlo, monospace;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin: 3.5rem 0 0.5rem;
-      }
-      .label-note { color: var(--muted); font-size: 0.85rem; margin: 0 0 1.25rem; }
-      ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; }
-      @media (min-width: 40rem) { ul { grid-template-columns: 1fr 1fr; } }
-      li > * {
-        display: block;
-        height: 100%;
-        padding: 1rem 1.1rem;
-        border: 1px solid var(--line);
-        border-radius: 0.6rem;
-        text-decoration: none;
-        color: inherit;
-      }
-      li a { transition: border-color 160ms ease, background-color 160ms ease; }
-      li a:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: rgba(255, 255, 255, 0.03); }
-      li a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      li div { border-style: dashed; opacity: 0.55; }
-      li strong { display: block; font-weight: 500; }
-      li span { color: var(--muted); font-size: 0.875rem; }
-      li em {
-        float: right;
-        font: 0.65rem/1.6 ui-monospace, Menlo, monospace;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        font-style: normal;
-        color: var(--muted);
-      }
-      li a em { color: var(--accent); }
-      footer { margin-top: 5rem; color: var(--muted); font-size: 0.85rem; }
-      footer a { color: var(--accent); }
-    </style>
+    <link rel="stylesheet" href="assets/toolshed.css" />
   </head>
   <body>
     <main>
@@ -74,16 +17,12 @@
         One place to answer “is this real, and what is it?” — without googling a tool, finding a
         site, and pasting your URL into it. Nothing you paste leaves your browser.
       </p>
-
       <div id="groups"></div>
-
-      <footer>
-        <a href="https://github.com/dashwhiz/toolshed">Source</a> ·
-        built by <a href="https://alekvel.dev">Aleksandar Velichkovikj</a>
-      </footer>
     </main>
 
-    <script>
+    <script type="module">
+      import { icon, renderFooter } from "./assets/toolshed.js";
+
       // Mirrors ROADMAP.md. Flip `built` to true when a tool ships.
       const GROUPS = [
         {
@@ -136,26 +75,37 @@
         }
 
         const list = document.createElement("ul");
+        list.className = "grid";
+
         for (const tool of group.tools) {
           const card = document.createElement(tool.built ? "a" : "div");
+          card.className = tool.built ? "card" : "card card--pending";
           if (tool.built) card.href = `tools/${tool.slug}/`;
 
-          const status = document.createElement("em");
-          status.textContent = tool.built ? "open" : "soon";
+          const top = document.createElement("span");
+          top.className = "card-top";
+          const state = document.createElement("span");
+          state.className = "card-state";
+          state.textContent = tool.built ? "open" : "soon";
+          top.append(state, icon(tool.built ? "arrow-right" : "clock"));
 
           const name = document.createElement("strong");
+          name.className = "card-name";
           name.textContent = tool.name;
 
           const blurb = document.createElement("span");
+          blurb.className = "card-blurb";
           blurb.textContent = tool.blurb;
 
-          card.append(status, name, blurb);
+          card.append(top, name, blurb);
           const li = document.createElement("li");
           li.append(card);
           list.append(li);
         }
         groups.append(list);
       }
+
+      renderFooter();
     </script>
   </body>
 </html>
