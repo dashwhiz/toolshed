@@ -24,4 +24,10 @@ colour, self-hosted Roboto, Lucide icons, no emoji, no in-page nav, sticky foote
 Decided against Next.js. Native ES modules already give the shared layer; a bundler would
 cost the auditability that is the whole pitch for a JWT or certificate decoder.
 
+Deep links had no way home once the in-page back link was removed, so the shared footer
+now carries the wordmark on any page below the root. Browser back was never broken — the
+search calls `preventDefault()`, so it adds no history entry.
+
+`site-check` is on the portfolio; portfolio build and lint both exit 0.
+
 Next: `unicode`, then `injection-scan`.

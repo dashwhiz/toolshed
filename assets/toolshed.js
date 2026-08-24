@@ -43,6 +43,11 @@ export function renderFooter() {
   const footer = document.createElement("footer");
   footer.className = "site-footer";
 
+  // Deep links (a bookmark, a shared URL) have no history to go back to, so every page
+  // below the root carries the wordmark home. Set data-home on <body> to switch it on.
+  const home = document.body.dataset.home;
+  if (home) footer.append(link(home, "toolshed"), separator());
+
   const built = document.createElement("span");
   built.append("built by ", link("https://alekvel.dev", "Aleksandar Velichkovikj"));
 
