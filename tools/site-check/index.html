@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Website trust check — toolshed</title>
+    <meta
+      name="description"
+      content="Check how old a domain is, who registered it, where it is hosted and whether it can send mail — before you trust it."
+    />
+    <style>
+      :root {
+        --bg: #08080a;
+        --fg: #f2f2f0;
+        --muted: #93939c;
+        --line: rgba(255, 255, 255, 0.08);
+        --accent: #3ddc84;
+        --warn: #f0b429;
+        --bad: #f2616b;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 4rem 1.5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main { max-width: 46rem; margin: 0 auto; }
+      a { color: var(--accent); }
+      .back { font-size: 0.85rem; color: var(--muted); text-decoration: none; }
+      .back:hover { color: var(--fg); }
+      h1 { font-size: 1.75rem; letter-spacing: -0.02em; margin: 1.5rem 0 0.5rem; }
+      .lede { color: var(--muted); max-width: 36rem; margin-top: 0; }
+      form { display: flex; gap: 0.5rem; margin: 2rem 0 0; flex-wrap: wrap; }
+      input {
+        flex: 1 1 18rem;
+        padding: 0.8rem 1rem;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--line);
+        border-radius: 0.6rem;
+        color: var(--fg);
+        font: inherit;
+      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      button {
+        padding: 0.8rem 1.4rem;
+        background: var(--accent);
+        color: #06210f;
+        border: 0;
+        border-radius: 0.6rem;
+        font: 500 inherit;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .note { color: var(--muted); font-size: 0.8rem; margin-top: 0.75rem; }
+      .verdict {
+        margin: 2.5rem 0 0;
+        padding: 1.25rem 1.4rem;
+        border: 1px solid var(--line);
+        border-left-width: 3px;
+        border-radius: 0.6rem;
+      }
+      .verdict h2 { margin: 0; font-size: 1.15rem; }
+      .verdict p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+      .verdict.good { border-left-color: var(--accent); }
+      .verdict.warn { border-left-color: var(--warn); }
+      .verdict.bad { border-left-color: var(--bad); }
+      .label {
+        font: 0.7rem/1 ui-monospace, Menlo, monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 2.5rem 0 1rem;
+      }
+      ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.5rem; }
+      .flag { display: flex; gap: 0.75rem; align-items: baseline; font-size: 0.925rem; }
+      .flag i { font-style: normal; flex: none; width: 1rem; text-align: center; }
+      .flag.bad i { color: var(--bad); }
+      .flag.warn i { color: var(--warn); }
+      .flag.good i { color: var(--accent); }
+      .flag.info i { color: var(--muted); }
+      .flag span { color: var(--muted); }
+      .flag b { font-weight: 500; color: var(--fg); }
+      dl { display: grid; grid-template-columns: 10rem 1fr; gap: 0.5rem 1rem; margin: 0; font-size: 0.925rem; }
+      @media (max-width: 34rem) { dl { grid-template-columns: 1fr; gap: 0.15rem; } dd { margin-bottom: 0.6rem; } }
+      dt { color: var(--muted); }
+      dd { margin: 0; overflow-wrap: anywhere; }
+      dd.mono, .flag code { font-family: ui-monospace, Menlo, monospace; font-size: 0.875rem; }
+      .limits { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+      .limits li { display: list-item; margin-left: 1.1rem; }
+      .limits ul { list-style: disc; gap: 0.25rem; margin-top: 0.5rem; }
+      footer { margin-top: 3rem; color: var(--muted); font-size: 0.85rem; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="../../">← toolshed</a>
+      <h1>Website trust check</h1>
+      <p class="lede">
+        How old is the domain, who registered it, where does it run, and can it send mail?
+        The signals that give away a site thrown up last week.
+      </p>
+
+      <form id="form">
+        <input
+          id="input"
+          type="text"
+          placeholder="example.com or https://example.com/page"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Domain or URL to check"
+        />
+        <button id="go" type="submit">Check</button>
+      </form>
+      <p class="note" id="status">
+        Uses public registration and DNS data. No account, no key, nothing stored.
+      </p>
+
+      <div id="results" hidden>
+        <div class="verdict" id="verdict">
+          <h2 id="verdict-title"></h2>
+          <p id="verdict-note"></p>
+        </div>
+
+        <p class="label">What stood out</p>
+        <ul id="flags"></ul>
+
+        <p class="label">Registration</p>
+        <dl id="registration"></dl>
+
+        <p class="label">DNS</p>
+        <dl id="dns"></dl>
+
+        <p class="label">Hosting</p>
+        <dl id="hosting"></dl>
+      </div>
+
+      <div class="limits">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>Nothing about the page itself — content, malware and reputation need a backend this deliberately does not have.</li>
+          <li>An old domain can still be a scam, and a legitimate site can be compromised.</li>
+          <li>Plenty of honest sites are new, hide their registrant, or take no mail. Read the signals, don't count them.</li>
+        </ul>
+      </div>
+
+      <footer>
+        <a href="https://github.com/dashwhiz/toolshed">Source</a> ·
+        built by <a href="https://alekvel.dev">Aleksandar Velichkovikj</a>
+      </footer>
+    </main>
+
+    <script>
+      const DOH = "https://dns.google/resolve";
+      const DAY = 86400000;
+
+      const els = {
+        form: document.getElementById("form"),
+        input: document.getElementById("input"),
+        go: document.getElementById("go"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        verdictTitle: document.getElementById("verdict-title"),
+        verdictNote: document.getElementById("verdict-note"),
+        flags: document.getElementById("flags"),
+        registration: document.getElementById("registration"),
+        dns: document.getElementById("dns"),
+        hosting: document.getElementById("hosting"),
+      };
+
+      // RFC 3492. Browsers dropped the punycode global, and a homograph domain is
+      // exactly the case this tool exists to catch, so decode it here.
+      function punydecode(input) {
+        const base = 36, tmin = 1, tmax = 26, skew = 38, damp = 700, initialBias = 72, initialN = 128;
+        let n = initialN, i = 0, bias = initialBias;
+        const out = [];
+        let basic = input.lastIndexOf("-");
+        if (basic < 0) basic = 0;
+        for (let j = 0; j < basic; j++) out.push(input.charCodeAt(j));
+        for (let idx = basic > 0 ? basic + 1 : 0; idx < input.length; ) {
+          const oldi = i;
+          for (let w = 1, k = base; ; k += base) {
+            if (idx >= input.length) return null;
+            const c = input.charCodeAt(idx++);
+            let digit;
+            if (c >= 48 && c <= 57) digit = c - 22;
+            else if (c >= 65 && c <= 90) digit = c - 65;
+            else if (c >= 97 && c <= 122) digit = c - 97;
+            else return null;
+            i += digit * w;
+            const t = k <= bias ? tmin : k >= bias + tmax ? tmax : k - bias;
+            if (digit < t) break;
+            w *= base - t;
+          }
+          const outLen = out.length + 1;
+          let delta = oldi === 0 ? Math.floor((i - oldi) / damp) : (i - oldi) >> 1;
+          delta += Math.floor(delta / outLen);
+          let k = 0;
+          for (; delta > ((base - tmin) * tmax) >> 1; k += base) delta = Math.floor(delta / (base - tmin));
+          bias = Math.floor(k + ((base - tmin + 1) * delta) / (delta + skew));
+          n += Math.floor(i / outLen);
+          i %= outLen;
+          out.splice(i++, 0, n);
+        }
+        return String.fromCodePoint(...out);
+      }
+
+      function toUnicode(host) {
+        return host
+          .split(".")
+          .map((label) => {
+            if (!label.startsWith("xn--")) return label;
+            const decoded = punydecode(label.slice(4));
+            return decoded === null ? label : decoded;
+          })
+          .join(".");
+      }
+
+      function parseHost(raw) {
+        let value = raw.trim();
+        if (!value) return null;
+        if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) value = "https://" + value;
+        let host;
+        try {
+          host = new URL(value).hostname;
+        } catch {
+          return null;
+        }
+        host = host.replace(/\.$/, "").toLowerCase();
+        if (!host.includes(".") || /\s/.test(host)) return null;
+        return host;
+      }
+
+      async function dns(name, type) {
+        const url = `${DOH}?name=${encodeURIComponent(name)}&type=${type}`;
+        const res = await fetch(url, { headers: { accept: "application/dns-json" } });
+        if (!res.ok) throw new Error(`DNS lookup failed (${res.status})`);
+        const body = await res.json();
+        return {
+          nxdomain: body.Status === 3,
+          records: (body.Answer || []).filter((a) => a.type !== 5).map((a) => a.data),
+        };
+      }
+
+      // rdap.org redirects to whichever registry runs the TLD. A 404 usually means the
+      // name is unregistered, but it also means "wrong label" for www. and co.uk style
+      // names, so walk up before believing it.
+      async function rdap(host) {
+        const labels = host.split(".");
+        for (let i = 0; i < labels.length - 1; i++) {
+          const candidate = labels.slice(i).join(".");
+          const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(candidate)}`, {
+            headers: { accept: "application/rdap+json" },
+          });
+          if (res.ok) return { domain: candidate, data: await res.json() };
+          if (res.status !== 404) throw new Error(`Registry lookup failed (${res.status})`);
+        }
+        return null;
+      }
+
+      function eventDate(data, action) {
+        const found = (data.events || []).find((e) => e.eventAction === action);
+        return found ? new Date(found.eventDate) : null;
+      }
+
+      function registrarName(data) {
+        const entity = (data.entities || []).find((e) => (e.roles || []).includes("registrar"));
+        if (!entity) return null;
+        if (entity.vcardArray && Array.isArray(entity.vcardArray[1])) {
+          const fn = entity.vcardArray[1].find((f) => f[0] === "fn");
+          if (fn) return fn[3];
+        }
+        return entity.handle || null;
+      }
+
+      function describeAge(ms) {
+        const days = Math.floor(ms / DAY);
+        if (days < 1) return "today";
+        if (days === 1) return "1 day";
+        if (days < 60) return `${days} days`;
+        const months = Math.floor(days / 30);
+        if (months < 24) return `${months} months`;
+        return `${(days / 365).toFixed(1)} years`;
+      }
+
+      const fmtDate = (d) =>
+        d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+      function row(dl, term, value, mono) {
+        const dt = document.createElement("dt");
+        dt.textContent = term;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        if (mono) dd.className = "mono";
+        dl.append(dt, dd);
+      }
+
+      function addFlag(list, level, headline, detail) {
+        const li = document.createElement("li");
+        li.className = `flag ${level}`;
+        const icon = document.createElement("i");
+        icon.textContent = level === "bad" ? "!" : level === "warn" ? "▲" : level === "good" ? "✓" : "·";
+        const text = document.createElement("span");
+        const strong = document.createElement("b");
+        strong.textContent = headline;
+        text.append(strong);
+        if (detail) text.append(` — ${detail}`);
+        li.append(icon, text);
+        list.append(li);
+      }
+
+      async function check(host) {
+        const flags = [];
+        const unicode = toUnicode(host);
+        if (unicode !== host) {
+          flags.push(["bad", "Domain uses non-Latin characters", `reads as “${unicode}”. Letters that look like ASCII are a common way to impersonate a familiar name.`]);
+        }
+
+        const val = (r) => (r.status === "fulfilled" ? r.value : null);
+
+        // Addresses belong to whatever host was typed, but MX, SPF and DMARC live on the
+        // registrable domain — a www. subdomain never has them, and checking there would
+        // report that half the web accepts no mail.
+        const [reg, a, aaaa] = await Promise.allSettled([
+          rdap(host),
+          dns(host, "A"),
+          dns(host, "AAAA"),
+        ]);
+        const registration = val(reg);
+        const mailDomain = registration ? registration.domain : host;
+
+        const [mx, ns, txt, dmarc] = await Promise.allSettled([
+          dns(mailDomain, "MX"),
+          dns(mailDomain, "NS"),
+          dns(mailDomain, "TXT"),
+          dns("_dmarc." + mailDomain, "TXT"),
+        ]);
+
+        const addresses = [...(val(a)?.records || []), ...(val(aaaa)?.records || [])];
+        const resolves = addresses.length > 0;
+
+        if (val(a)?.nxdomain && !resolves) {
+          flags.push(["bad", "Domain does not resolve", "no address record. It is not serving a site right now."]);
+        } else if (!resolves) {
+          flags.push(["warn", "No address record", "the name exists but points nowhere."]);
+        }
+
+        // Registration
+        els.registration.replaceChildren();
+        if (reg.status === "rejected") {
+          row(els.registration, "Status", "Registry lookup failed — " + reg.reason.message);
+        } else if (!registration) {
+          row(els.registration, "Status", "No registry record found");
+          flags.push(["bad", "Not registered", "no registry has a record for this name. Check the spelling."]);
+        } else {
+          const created = eventDate(registration.data, "registration");
+          const expires = eventDate(registration.data, "expiration");
+          const registrar = registrarName(registration.data);
+          const statuses = registration.data.status || [];
+
+          row(els.registration, "Domain", registration.domain, true);
+          if (created) {
+            const age = Date.now() - created.getTime();
+            row(els.registration, "Registered", `${fmtDate(created)} — ${describeAge(age)} ago`);
+            if (age < 30 * DAY) {
+              flags.push(["bad", `Registered ${describeAge(age)} ago`, "brand new. Most throwaway scam domains are days old."]);
+            } else if (age < 180 * DAY) {
+              flags.push(["warn", `Registered ${describeAge(age)} ago`, "still young. Fine for a new business, worth noting for a familiar brand."]);
+            } else if (age > 2 * 365 * DAY) {
+              flags.push(["good", `Registered ${describeAge(age)} ago`, "a long history is hard to fake."]);
+            }
+          } else {
+            row(els.registration, "Registered", "not published by this registry");
+          }
+          if (expires) {
+            row(els.registration, "Expires", fmtDate(expires));
+            const left = expires.getTime() - Date.now();
+            if (left < 30 * DAY) {
+              flags.push(["warn", "Expires within a month", "either about to be renewed, or about to be abandoned."]);
+            }
+          }
+          if (registrar) row(els.registration, "Registrar", registrar);
+          if (statuses.length) row(els.registration, "Registry status", statuses.join(", "), true);
+          const held = statuses.filter((s) => /hold|pending ?delete/i.test(s));
+          if (held.length) {
+            flags.push(["bad", "Registry has suspended this domain", `status: ${held.join(", ")}. Often follows an abuse report.`]);
+          }
+        }
+
+        // DNS
+        els.dns.replaceChildren();
+        row(els.dns, "Addresses", addresses.length ? addresses.join(", ") : "none", true);
+        const nameservers = val(ns)?.records || [];
+        if (nameservers.length) row(els.dns, "Nameservers", nameservers.join(", "), true);
+
+        if (mailDomain !== host) row(els.dns, "Mail checked on", mailDomain, true);
+        const mailServers = val(mx)?.records || [];
+        row(els.dns, "Mail servers", mailServers.length ? mailServers.join(", ") : "none", true);
+        if (mailServers.length === 0) {
+          flags.push(["warn", "Accepts no mail", `no MX record on ${mailDomain}, so nobody can email it. Unusual for a real business.`]);
+        }
+
+        const txts = val(txt)?.records || [];
+        const spf = txts.find((t) => t.replace(/"/g, "").toLowerCase().startsWith("v=spf1"));
+        row(els.dns, "SPF", spf ? "present" : "none");
+        const dmarcTxt = (val(dmarc)?.records || []).find((t) => /v=DMARC1/i.test(t));
+        row(els.dns, "DMARC", dmarcTxt ? dmarcTxt.replace(/"/g, "") : "none", !!dmarcTxt);
+        if (mailServers.length && !spf) {
+          flags.push(["info", "No SPF record", "mail claiming to come from here is easier to forge."]);
+        }
+        if (mailServers.length && !dmarcTxt) {
+          flags.push(["info", "No DMARC policy", "nothing tells inboxes what to do with forged mail from this domain."]);
+        }
+
+        // Hosting
+        els.hosting.replaceChildren();
+        const ipv4 = val(a)?.records?.[0];
+        if (!ipv4) {
+          row(els.hosting, "Host", "unknown — no IPv4 address to look up");
+        } else {
+          try {
+            const res = await fetch(`https://ipwho.is/${encodeURIComponent(ipv4)}`);
+            const info = await res.json();
+            if (info && info.success) {
+              row(els.hosting, "IP address", info.ip, true);
+              if (info.connection?.org || info.connection?.isp) {
+                row(els.hosting, "Network", info.connection.org || info.connection.isp);
+              }
+              if (info.connection?.asn) row(els.hosting, "ASN", "AS" + info.connection.asn, true);
+              const place = [info.city, info.country].filter(Boolean).join(", ");
+              if (place) row(els.hosting, "Located", place);
+            } else {
+              row(els.hosting, "Host", "lookup returned nothing for " + ipv4);
+            }
+          } catch (err) {
+            row(els.hosting, "Host", "lookup failed — " + err.message);
+          }
+        }
+
+        // Verdict
+        els.flags.replaceChildren();
+        const order = { bad: 0, warn: 1, info: 2, good: 3 };
+        flags.sort((x, y) => order[x[0]] - order[y[0]]);
+        if (!flags.length) addFlag(els.flags, "info", "Nothing notable", "no signal either way.");
+        for (const [level, headline, detail] of flags) addFlag(els.flags, level, headline, detail);
+
+        const bad = flags.filter((f) => f[0] === "bad").length;
+        const warn = flags.filter((f) => f[0] === "warn").length;
+        if (bad) {
+          els.verdict.className = "verdict bad";
+          els.verdictTitle.textContent = "Strong warning signs";
+          els.verdictNote.textContent = "Treat anything this domain asks of you with suspicion, especially payments and passwords.";
+        } else if (warn >= 2) {
+          els.verdict.className = "verdict warn";
+          els.verdictTitle.textContent = "Worth a closer look";
+          els.verdictNote.textContent = "Nothing damning, but more than one thing here is unusual. Verify through a channel you already trust.";
+        } else if (warn === 1) {
+          els.verdict.className = "verdict warn";
+          els.verdictTitle.textContent = "Mostly ordinary, one thing to note";
+          els.verdictNote.textContent = "The single flag below may be perfectly innocent. Read it and judge.";
+        } else {
+          els.verdict.className = "verdict good";
+          els.verdictTitle.textContent = "Looks established";
+          els.verdictNote.textContent = "The registration and DNS record look like a domain that has been around and is properly run. That is not proof it is honest.";
+        }
+      }
+
+      els.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const host = parseHost(els.input.value);
+        if (!host) {
+          els.status.textContent = "That does not look like a domain. Try example.com.";
+          return;
+        }
+        els.go.disabled = true;
+        els.status.textContent = `Checking ${host}…`;
+        try {
+          await check(host);
+          els.results.hidden = false;
+          els.status.textContent = `Checked ${host}. Public registration and DNS data only.`;
+        } catch (err) {
+          els.status.textContent = "Could not complete the check — " + err.message;
+        } finally {
+          els.go.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

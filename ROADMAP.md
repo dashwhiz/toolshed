@@ -18,7 +18,7 @@ Needs the network. Only uses endpoints that send `Access-Control-Allow-Origin: *
 
 | Tool | Slug | Status | Notes |
 | --- | --- | --- | --- |
-| Website trust check | `site-check` | idea | Flagship. URL in → domain age, registrar, DNS, host, plain-English verdict with the red flags named |
+| Website trust check | `site-check` | shipped | Flagship. URL in → domain age, registrar, DNS, host, plain-English verdict with the red flags named |
 | DNS records | `dns` | idea | A/AAAA/MX/NS/TXT/CAA/SOA over DoH, pick resolver |
 | Email spoofability | `email-auth` | idea | SPF + DMARC + DKIM + MX for a domain — could someone forge mail from it? |
 | IP & ASN lookup | `ip` | idea | Owner, network, country, datacenter vs residential |
