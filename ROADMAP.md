@@ -20,8 +20,8 @@ Needs the network. Only uses endpoints that send `Access-Control-Allow-Origin: *
 | Tool | Slug | Status | Notes |
 | --- | --- | --- | --- |
 | Website trust check | `site-check` | on-portfolio | Flagship. URL in → domain age, registrar, DNS, host, plain-English verdict with the red flags named |
-| DNS records | `dns` | shipped | A/AAAA/MX/NS/TXT/CAA/SOA over DoH, pick resolver |
-| Email spoofability | `email-auth` | shipped | SPF + DMARC + DKIM + MX for a domain — could someone forge mail from it? |
+| DNS records | `dns` | on-portfolio | A/AAAA/MX/NS/TXT/CAA/SOA over DoH, pick resolver |
+| Email spoofability | `email-auth` | on-portfolio | SPF + DMARC + DKIM + MX for a domain — could someone forge mail from it? |
 | IP & ASN lookup | `ip` | idea | Owner, network, country, datacenter vs residential |
 
 ## Inspect something you were sent
@@ -31,10 +31,10 @@ Fully offline. Nothing leaves the browser — say so on every page.
 | Tool | Slug | Status | Notes |
 | --- | --- | --- | --- |
 | Link inspector | `link` | idea | Punycode/IDN homograph detection, unwrap Outlook/Proofpoint safelinks, explain tracking params |
-| Hidden characters | `unicode` | shipped | Zero-width, homoglyphs, smart quotes, NBSP — catches phishing and broken code |
+| Hidden characters | `unicode` | on-portfolio | Zero-width, homoglyphs, smart quotes, NBSP — catches phishing and broken code |
 | JWT decoder | `jwt` | idea | Decode only, never leaves the browser |
 | Certificate decoder | `cert` | idea | Paste PEM → issuer, subject, SANs, validity |
-| Prompt injection scan | `injection-scan` | shipped | Paste content an agent is about to read. See the note below before building |
+| Prompt injection scan | `injection-scan` | on-portfolio | Paste content an agent is about to read. See the note below before building |
 
 ### On the injection scan
 
