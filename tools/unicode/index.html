@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hidden characters — Toolshed</title>
+    <meta
+      name="description"
+      content="Find zero-width characters, look-alike letters, bidi overrides and smart quotes hiding in text. Runs entirely in your browser."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main>
+      <h1>Hidden characters</h1>
+      <p class="lede">
+        Text can carry characters you cannot see — invisible spaces, letters borrowed from
+        another alphabet, marks that reverse how a line reads. Paste anything and see what
+        is actually in it.
+      </p>
+
+      <textarea
+        id="input"
+        placeholder="Paste text here — an email, a filename, a config line, a domain"
+        aria-label="Text to scan"
+        spellcheck="false"
+      ></textarea>
+      <div class="actions">
+        <button id="sample" class="secondary" type="button">Try an example</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <p class="note" id="status">Nothing is uploaded. The scan runs in this page.</p>
+
+      <div id="results" hidden>
+        <div class="verdict" id="verdict"></div>
+
+        <p class="label">What is in there</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Cleaned up</p>
+        <p class="note" style="margin-top: -0.5rem">
+          Invisible characters removed, look-alikes folded to Latin, smart punctuation made plain.
+        </p>
+        <pre class="output" id="cleaned"></pre>
+        <div class="actions">
+          <button id="copy" type="button">Copy cleaned text</button>
+        </div>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>It reports what characters are present, not whether they are malicious. Zero-width joiners are normal in emoji, and plenty of scripts legitimately need marks flagged here.</li>
+          <li>The look-alike list covers common Cyrillic and Greek letters that imitate Latin ones. It is not the full Unicode confusables table, so an unusual substitution can slip past.</li>
+          <li>Clean text is not safe text. This says nothing about what the words are asking you to do.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { renderVerdict, renderFindings, countBy } from "../../assets/toolshed.js";
+      import { scanText, cleanText } from "../../assets/scan.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        findings: document.getElementById("findings"),
+        cleaned: document.getElementById("cleaned"),
+        copy: document.getElementById("copy"),
+        sample: document.getElementById("sample"),
+        clear: document.getElementById("clear"),
+      };
+
+      // Built from escapes so the file itself stays readable and copy-paste safe.
+      const SAMPLE =
+        "Invoice from раypal.com\n" +
+        "Reference:​ 8842​-​1190\n" +
+        "Amount: “€420.00” — due today now\n" +
+        "Attachment: ‮gnp.eslaf‬";
+
+      function describe(group) {
+        const where = group.samples.map((s) => s.index).join(", ");
+        return `${group.count} occurrence${group.count === 1 ? "" : "s"}, at character ${where}. ${group.detail}`;
+      }
+
+      function run() {
+        const text = els.input.value;
+        if (!text) {
+          els.results.hidden = true;
+          els.status.textContent = "Nothing is uploaded. The scan runs in this page.";
+          return;
+        }
+
+        const { total, groups } = scanText(text);
+        renderFindings(
+          els.findings,
+          groups.map((g) => ({ level: g.level, headline: g.label, detail: describe(g) })),
+        );
+
+        const bad = groups.filter((g) => g.level === "bad").length;
+        const warn = groups.filter((g) => g.level === "warn").length;
+        if (bad) {
+          renderVerdict(els.verdict, "bad", "Something is hidden in this text",
+            "It contains characters designed not to be seen, or letters impersonating other letters. Treat the source as suspect.");
+        } else if (warn) {
+          renderVerdict(els.verdict, "warn", "Invisible characters present",
+            "Nothing here impersonates anything, but the text is not what it appears to be. Often a copy-paste artefact.");
+        } else if (total) {
+          renderVerdict(els.verdict, "info", "Only typographic punctuation",
+            "Smart quotes, dashes or non-breaking spaces. Fine in prose; these are what break a config file or a command.");
+        } else {
+          renderVerdict(els.verdict, "good", "Plain text",
+            "Every character here is what it looks like.");
+        }
+
+        els.cleaned.textContent = cleanText(text);
+        els.results.hidden = false;
+        const chars = [...text].length;
+        els.status.textContent = `${chars} character${chars === 1 ? "" : "s"} scanned in this page. Nothing was uploaded.`;
+      }
+
+      els.input.addEventListener("input", run);
+      els.sample.addEventListener("click", () => { els.input.value = SAMPLE; run(); });
+      els.clear.addEventListener("click", () => { els.input.value = ""; els.input.focus(); run(); });
+      els.copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(els.cleaned.textContent);
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy cleaned text"; }, 1500);
+      });
+    </script>
+  </body>
+</html>

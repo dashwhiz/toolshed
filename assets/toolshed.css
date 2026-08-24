@@ -173,6 +173,40 @@ button:disabled { opacity: 0.5; cursor: default; }
   button { width: 100%; }
 }
 
+textarea {
+  width: 100%;
+  margin-top: 2rem;
+  padding: 0.9rem 1rem;
+  min-height: 9rem;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.55;
+  resize: vertical;
+}
+textarea::placeholder { color: var(--muted); }
+textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.actions button { flex: 0 0 auto; }
+button.secondary { background: none; border: 1px solid var(--line-strong); color: var(--fg); }
+button.secondary:hover { border-color: var(--accent); }
+@media (max-width: 30rem) { .actions { flex-direction: column; } .actions button { width: 100%; } }
+
+/* Read-only output people copy out of. */
+.output {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
 .note { color: var(--muted); font-size: 0.8rem; margin-top: 0.75rem; }
 
 /* Data -------------------------------------------------------------------- */
