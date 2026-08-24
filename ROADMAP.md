@@ -21,7 +21,7 @@ Needs the network. Only uses endpoints that send `Access-Control-Allow-Origin: *
 | --- | --- | --- | --- |
 | Website trust check | `site-check` | on-portfolio | Flagship. URL in → domain age, registrar, DNS, host, plain-English verdict with the red flags named |
 | DNS records | `dns` | shipped | A/AAAA/MX/NS/TXT/CAA/SOA over DoH, pick resolver |
-| Email spoofability | `email-auth` | idea | SPF + DMARC + DKIM + MX for a domain — could someone forge mail from it? |
+| Email spoofability | `email-auth` | shipped | SPF + DMARC + DKIM + MX for a domain — could someone forge mail from it? |
 | IP & ASN lookup | `ip` | idea | Owner, network, country, datacenter vs residential |
 
 ## Inspect something you were sent
@@ -91,7 +91,7 @@ Cut deliberately. Recorded so they don't get re-added by accident.
 
 ## Next up
 
-Build order when nothing is `building`: `unicode`, then `injection-scan`, then `dns`.
+Build order when nothing is `building`: `link`, then `jwt`, then `ip`.
 The rest of the table is unordered.
 
 ## Rules
