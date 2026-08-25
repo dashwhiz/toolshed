@@ -47,8 +47,9 @@ Tones map to meaning, not decoration: `good` (accent), `warn`, `bad`, `info` (mu
 renders the footer. A page must not restate either — if a page needs a style that another
 page will also need, it belongs in the stylesheet.
 
-The footer is `Toolshed · Source · Aleksandar Velichkovikj` and nothing more — do not add a
-privacy note there, it belongs in the page body where it is read.
+The footer is `Toolshed · Source · What's next · Report a problem` and nothing more. Do not
+add a privacy note there — it belongs in the page body where it is read — and do not link out
+to anything that is not this project.
 
 It follows the portfolio's footer: centered, generous padding above a `--line` rule, 0.75rem
 muted text, links underlined at a 4px offset that lift to `--fg` on hover, `·` separators in

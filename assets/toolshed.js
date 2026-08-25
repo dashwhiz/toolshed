@@ -51,7 +51,9 @@ export function renderFooter() {
   footer.append(
     link("https://github.com/dashwhiz/toolshed", "Source"),
     separator(),
-    link("https://alekvel.dev", "Aleksandar Velichkovikj"),
+    link("https://github.com/dashwhiz/toolshed/blob/main/ROADMAP.md", "What's next"),
+    separator(),
+    link("https://github.com/dashwhiz/toolshed/issues", "Report a problem"),
   );
   document.body.append(footer);
 }

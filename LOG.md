@@ -108,3 +108,8 @@ README and the portfolio blurb. These get used for questions anyone can have —
 real, where does this link go — and describing them as developer tooling undersold who they
 are for.
 
+Footer no longer links out to the portfolio. It now carries Toolshed, Source, What's next
+(the roadmap) and Report a problem (issues) — all pointing back into this project, which is
+what a visitor standing on one of these pages would actually want next. "What's next" also
+explains the SOON cards on the landing page, which previously had nothing behind them.
+
