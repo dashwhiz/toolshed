@@ -132,11 +132,14 @@
         }
         if (host.endsWith("urldefense.proofpoint.com") || host.endsWith("urldefense.com")) {
           const v3 = url.match(/\/v3\/__(.+?)__;/);
-          if (v3) return { url: decodeURIComponent(v3[1]), via: "Proofpoint URL Defense v3" };
+          if (v3) {
+            try { return { url: decodeURIComponent(v3[1]), via: "Proofpoint URL Defense v3" }; } catch { return null; }
+          }
           const u2 = param("u");
           if (u2) {
             // v2 swaps - for % and _ for / before percent-encoding.
-            const decoded = decodeURIComponent(u2.replace(/-/g, "%").replace(/_/g, "/"));
+            let decoded;
+            try { decoded = decodeURIComponent(u2.replace(/-/g, "%").replace(/_/g, "/")); } catch { return null; }
             return { url: decoded, via: "Proofpoint URL Defense v2" };
           }
         }
@@ -148,12 +151,16 @@
           const target = param("q") || param("url");
           if (target) return { url: target, via: "Google redirect" };
         }
-        for (const name of ["url", "u", "target", "redirect", "redirect_url", "dest", "destination", "link", "to"]) {
-          const target = param(name);
-          if (target && looksLikeUrl(target)) {
-            return { url: target, via: `a ${name}= parameter on ${host}` };
-          }
-        }
+        /*
+         * Everything above is a host we know forwards. Treating a ?redirect= parameter
+         * on ANY host as a wrapper meant this reported the parameter's value as the
+         * destination — so evil-phish.tld/?redirect=paypal.com came back as "goes to
+         * www.paypal.com", handing a phisher the victim's own brand as the verdict.
+         *
+         * An arbitrary host may honour that parameter, ignore it, or send you somewhere
+         * else entirely. Only the host you actually contact is knowable from here, so
+         * the parameter is surfaced as a warning and never followed.
+         */
         return null;
       }
 
@@ -206,12 +213,32 @@
         // Host
         const host = url.hostname;
         const decoded = toUnicode(host);
-        if (decoded !== host) {
-          findings.push({ level: "bad", headline: "Domain is written in another alphabet", detail: `it reads as “${decoded}”. Punycode lets a name that looks familiar be an entirely different domain.` });
+
+        // A URL parked in a query parameter is worth naming — it is how a phishing link
+        // borrows a trusted brand — but it is not where the link goes.
+        for (const name of ["url", "u", "target", "redirect", "redirect_url", "dest", "destination", "link", "to"]) {
+          const embedded = url.searchParams.get(name);
+          if (!embedded || !looksLikeUrl(embedded)) continue;
+          let shown = embedded;
+          try { shown = new URL(embedded).hostname; } catch {}
+          findings.push({
+            level: "warn",
+            headline: "Another address is carried in the link",
+            detail: `a ${name}= parameter names ${shown}, but you would be contacting ${host} first. It may forward you there, somewhere else, or nowhere.`,
+          });
+          break;
         }
+
+        // Run the confusable scan on the decoded form unconditionally — gating it on
+        // `decoded === host` meant it only ran when the host was pure ASCII, where no
+        // confusable can exist, so it could never fire.
         const confusables = scanText(decoded).groups.filter((g) => g.level === "bad");
-        if (confusables.length && decoded === host) {
+        if (confusables.length) {
           findings.push({ level: "bad", headline: "Look-alike letters in the domain", detail: confusables[0].detail });
+        } else if (decoded !== host) {
+          // A single-script IDN is an ordinary German, Greek or Chinese domain. Calling
+          // every one of them an attack trains people to ignore the one that matters.
+          findings.push({ level: "info", headline: "Domain uses non-Latin letters", detail: `it reads as “${decoded}”. Normal for a domain in that language; only a concern when the letters imitate another name.` });
         }
         if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[")) {
           findings.push({ level: "warn", headline: "Points at a raw address", detail: "a bare IP rather than a domain name. Ordinary services use names." });

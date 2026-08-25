@@ -22,20 +22,6 @@ export function icon(name, tone) {
   return svg;
 }
 
-function link(href, text) {
-  const a = document.createElement("a");
-  a.href = href;
-  a.textContent = text;
-  return a;
-}
-
-function separator() {
-  const span = document.createElement("span");
-  span.className = "sep";
-  span.textContent = "·";
-  return span;
-}
-
 export function renderFooter() {
   // Sibling of <main>, not a child — the sticky-footer layout needs it on <body>.
   if (document.querySelector(".site-footer")) return;
@@ -45,28 +31,23 @@ export function renderFooter() {
 
   const blurb = document.createElement("p");
   blurb.className = "site-footer-note";
-  blurb.textContent =
-    "Built one at a time, for questions that came up once and then kept coming up. " +
-    "Every page here is a single file with no accounts, no tracking and no server — " +
-    "whatever you paste stays in this browser.";
 
-  const links = document.createElement("p");
-  links.className = "site-footer-links";
+  /*
+   * This runs on every page, so a single blanket sentence is always wrong somewhere.
+   * It previously claimed "whatever you paste stays in this browser" on site-check,
+   * dns and email-auth, which send the domain you type to third parties.
+   *
+   * Pages that reach the network declare what they contact via data-sends on <body>.
+   * Anything without it makes no request at all, and says so.
+   */
+  const sends = document.body.dataset.sends;
+  blurb.textContent = sends
+    ? "Every page here is a single file with no accounts, no tracking and no server of " +
+      `its own. This one looks the domain up against ${sends}, and sends nothing else.`
+    : "Every page here is a single file with no accounts, no tracking and no server — " +
+      "what you paste into this one never leaves the browser.";
 
-  // Deep links (a bookmark, a shared URL) have no history to go back to, so every page
-  // below the root carries the wordmark home. Set data-home on <body> to switch it on.
-  const home = document.body.dataset.home;
-  if (home) links.append(link(home, "All tools"), separator());
-
-  links.append(
-    link("https://github.com/dashwhiz/toolshed", "Source"),
-    separator(),
-    link("https://github.com/dashwhiz/toolshed/blob/main/ROADMAP.md", "What's next"),
-    separator(),
-    link("https://github.com/dashwhiz/toolshed/issues", "Report a problem"),
-  );
-
-  footer.append(blurb, links);
+  footer.append(blurb);
   document.body.append(footer);
 }
 

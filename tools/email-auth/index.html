@@ -11,7 +11,7 @@
     <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="../../assets/toolshed.css" />
   </head>
-  <body data-home="../../">
+  <body data-home="../../" data-sends="public DNS resolvers">
     <main>
       <h1>Email spoofability</h1>
       <p class="lede">
@@ -77,9 +77,26 @@
       const clean = (t) => t.replace(/^"|"$/g, "").replace(/" "/g, "");
 
       function readSpf(record) {
-        const all = record.match(/([-~?+])all\b/);
-        const qualifier = all ? all[1] : null;
-        const lookups = (record.match(/\b(include|a|mx|ptr|exists|redirect):?/g) || []).length;
+        /*
+         * The qualifier belongs to the `all` MECHANISM, which is a whitespace-delimited
+         * token at the end. Matching /([-~?+])all\b/ found the first "all" anywhere,
+         * including inside include:_spf-all.example.com — so a domain publishing ~all
+         * was reported as -all and graded "well defended".
+         *
+         * A bare `all` with no qualifier means +all: authorise every server on earth.
+         */
+        const mechanisms = record.trim().split(/\s+/);
+        let qualifier = null;
+        for (const token of mechanisms) {
+          const m = token.match(/^([-~?+]?)all$/i);
+          if (m) qualifier = m[1] || "+";
+        }
+
+        // Only these mechanisms cost a DNS lookup, and only as whole tokens.
+        const lookups = mechanisms.filter((t) =>
+          /^[-~?+]?(include:|a$|a:|mx$|mx:|ptr$|ptr:|exists:|redirect=)/i.test(t),
+        ).length;
+
         return { qualifier, lookups };
       }
 
@@ -97,10 +114,38 @@
         ]);
         const settled = (r) => (r.status === "fulfilled" ? r.value : null);
 
+        // A failed lookup is not an absent record. Defaulting to [] and then asserting
+        // "no DMARC policy" turned a resolver hiccup into "anyone can forge mail".
+        const lookupFailed = [mxRes, txtRes, dmarcRes].some((r) => r.status === "rejected");
+
         const mx = settled(mxRes)?.records || [];
         const txt = (settled(txtRes)?.records || []).map(clean);
-        const spfRecord = txt.find((t) => t.toLowerCase().startsWith("v=spf1"));
-        const dmarcRecord = (settled(dmarcRes)?.records || []).map(clean).find((t) => /^v=DMARC1/i.test(t));
+        const spfAll = txt.filter((t) => t.toLowerCase().startsWith("v=spf1"));
+        const spfRecord = spfAll[0];
+        let dmarcRecord = (settled(dmarcRes)?.records || []).map(clean).find((t) => /^v=DMARC1/i.test(t));
+        let dmarcFrom = host;
+
+        /*
+         * RFC 7489 §6.6.3: a receiver finding no record at the exact name falls back to
+         * the organizational domain. Without this, mail.google.com, www.paypal.com and
+         * api.github.com all reported "anyone can forge mail" while being covered by a
+         * p=reject policy one level up — and those subdomains are exactly what people paste.
+         */
+        const labels = host.split(".");
+        for (let i = 1; !dmarcRecord && i < labels.length - 1; i++) {
+          const parent = labels.slice(i).join(".");
+          try {
+            const res = await dns("_dmarc." + parent, "TXT");
+            const found = res.records.map(clean).find((t) => /^v=DMARC1/i.test(t));
+            if (found) {
+              dmarcRecord = found;
+              dmarcFrom = parent;
+            }
+          } catch {
+            break;
+          }
+        }
+        const dmarcInherited = dmarcFrom !== host;
 
         els.records.replaceChildren();
         row(els.records, "Domain", host, true);
@@ -185,16 +230,46 @@
           findings.push({ level: "info", headline: "Receives no mail", detail: "no MX record. The domain can still be forged as a sender." });
         }
 
+        // Extra findings the parsing above now makes possible.
+        if (spfAll.length > 1) {
+          findings.push({ level: "bad", headline: "More than one SPF record", detail: "two or more v=spf1 records is a permanent error. Receivers treat SPF as failing entirely, so it protects nothing." });
+        }
+        if (spfRecord && readSpf(spfRecord).qualifier === "+") {
+          findings.push({ level: "bad", headline: "SPF authorises every server", detail: "the record ends in +all, which tells receivers that any server on the internet may send as this domain." });
+        }
+        if (dmarcInherited) {
+          findings.push({ level: "info", headline: "Policy inherited from " + dmarcFrom, detail: `this name publishes no DMARC record of its own, so receivers apply the one on ${dmarcFrom}, as the specification requires.` });
+        }
+        if (lookupFailed) {
+          findings.push({ level: "warn", headline: "Some lookups did not complete", detail: "at least one DNS query failed, so a missing record below may simply be unknown. This is not a clean result." });
+        }
+
         renderFindings(els.findings, findings);
 
-        const dmarcPolicy = dmarcRecord ? readDmarc(dmarcRecord).p : null;
-        const spfStrict = spfRecord && ["-", "~"].includes(readSpf(spfRecord).qualifier);
-        if (!spfRecord && !dmarcRecord) {
+        const dmarc = dmarcRecord ? readDmarc(dmarcRecord) : null;
+        // An inherited policy is applied to a subdomain through sp= when present.
+        const dmarcPolicy = dmarc ? (dmarcInherited && dmarc.sp ? dmarc.sp : dmarc.p) : null;
+
+        // pct=0 means the policy is applied to none of the mail — a normal rollout state,
+        // and functionally identical to p=none however strict the policy reads.
+        const pct = dmarc && dmarc.pct !== undefined ? Number(dmarc.pct) : 100;
+        const enforced = Number.isFinite(pct) ? pct >= 100 : true;
+
+        const spfQualifier = spfRecord ? readSpf(spfRecord).qualifier : null;
+        const spfStrict = spfAll.length === 1 && ["-", "~"].includes(spfQualifier);
+
+        if (lookupFailed) {
+          renderVerdict(els.verdict, "warn", "Could not check this domain",
+            "At least one DNS lookup failed, so the records below are incomplete. Try again before drawing any conclusion.");
+        } else if (!spfRecord && !dmarcRecord) {
           renderVerdict(els.verdict, "bad", "Anyone can forge mail from this domain",
             "Neither SPF nor DMARC is published, so a receiving server has nothing to check a sender against.");
-        } else if (dmarcPolicy === "reject" && spfStrict) {
+        } else if (dmarcPolicy === "reject" && spfStrict && enforced) {
           renderVerdict(els.verdict, "good", "Well defended",
             "SPF restricts who may send and DMARC asks receivers to reject anything that fails. About as good as this gets.");
+        } else if ((dmarcPolicy === "reject" || dmarcPolicy === "quarantine") && !enforced) {
+          renderVerdict(els.verdict, "warn", "Policy published but not applied",
+            `The DMARC policy reads ${dmarcPolicy}, but pct=${dmarc.pct} applies it to that share of mail. Until it reaches 100 it behaves much like no policy at all.`);
         } else if (dmarcPolicy === "reject" || dmarcPolicy === "quarantine") {
           renderVerdict(els.verdict, "warn", "Partly defended",
             "There is an enforcing DMARC policy, but the records below have gaps worth closing.");
