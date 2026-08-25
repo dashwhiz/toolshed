@@ -87,7 +87,10 @@ wrapped URL on screen.
 It cannot follow redirects — CORS forbids the request — so a shortener's real destination
 stays unknown. That is stated first in the caveats rather than buried.
 
-`link` is on-portfolio; portfolio build and lint exit 0. Next: `jwt`, then `ip`, then `cert`.
+`link` is on-portfolio; portfolio build and lint exit 0. The portfolio needed no change — its single Toolshed entry already covers whatever ships
+here, which is the point of collapsing it. Marked `on-portfolio` without touching that repo.
+
+Next: `jwt`, then `ip`, then `cert`.
 
 Collapsed the portfolio's `shipped` list from six per-tool entries down to one Toolshed
 entry linking to the collection. Six near-identical rows, all pointing at the same repo,
@@ -139,5 +142,7 @@ links was correct and dull.
 Note for the next session: the local server caches aggressively during editing. If a change
 does not appear, serve on a new port rather than trusting a reload.
 
-Next: `jwt`, then `ip`, then `cert`.
+The portfolio needed no change — its single Toolshed entry already covers whatever ships
+here, which is the point of collapsing it. Marked `on-portfolio` without touching that repo.
 
+Next: `jwt`, then `ip`, then `cert`.

@@ -57,7 +57,7 @@ Note in `.caveats` that a site can serve the agent different content than it ser
 
 | Tool | Slug | Status | Notes |
 | --- | --- | --- | --- |
-| JSON formatter | `json` | shipped | Two panes. Repairs broken JSON, keeps long numbers exact, warns on duplicate keys |
+| JSON formatter | `json` | on-portfolio | Two panes. Repairs broken JSON, keeps long numbers exact, warns on duplicate keys |
 | Timestamp converter | `timestamp` | idea | Epoch ⇄ human, timezone aware |
 | ID generator | `ids` | idea | UUID v4, ULID, nanoid, bulk + copy |
 | Hash generator | `hash` | idea | SHA-1/256/512 via WebCrypto (no MD5 — WebCrypto has none) |
