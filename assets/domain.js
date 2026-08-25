@@ -34,6 +34,10 @@ export function punydecode(input) {
     for (; delta > ((base - tmin) * tmax) >> 1; k += base) delta = Math.floor(delta / (base - tmin));
     bias = Math.floor(k + ((base - tmin + 1) * delta) / (delta + skew));
     n += Math.floor(i / outLen);
+    // A malformed label can drive n past the Unicode range or into the surrogate
+    // block; String.fromCodePoint would throw and take the whole click handler
+    // with it, leaving a dead button.
+    if (n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) return null;
     i %= outLen;
     out.splice(i++, 0, n);
   }
@@ -79,20 +83,38 @@ export async function dns(name, type) {
   };
 }
 
-// rdap.org redirects to whichever registry runs the TLD. A 404 usually means the name is
-// unregistered, but it also means "wrong label" for www. and co.uk style names, so walk up
-// before believing it. Avoids bundling the public suffix list.
+/**
+ * rdap.org redirects to whichever registry runs the TLD, and a 404 means one of two
+ * opposite things:
+ *
+ *   404 after a redirect  — a real registry answered "no such domain". The name is free.
+ *   404 with no redirect  — rdap.org has no registry for this TLD at all. Says nothing
+ *                           about the name. `.de` and `.at` are both in this bucket,
+ *                           which is ~17 million German domains alone.
+ *
+ * Reading the second as the first told every .de owner their domain was unregistered.
+ * Callers must handle `unsupported` as "we do not know", never as a red flag.
+ */
 export async function rdap(host) {
   const labels = host.split(".");
+
   for (let i = 0; i < labels.length - 1; i++) {
     const candidate = labels.slice(i).join(".");
     const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(candidate)}`, {
       headers: { accept: "application/rdap+json" },
     });
-    if (res.ok) return { domain: candidate, data: await res.json() };
-    if (res.status !== 404) throw new Error(`Registry lookup failed (${res.status})`);
+
+    if (res.ok) return { status: "found", domain: candidate, data: await res.json() };
+
+    if (res.status === 404) {
+      if (!res.redirected) return { status: "unsupported", domain: candidate };
+      continue; // a registry said not-found; try the shorter candidate (www.x.com -> x.com)
+    }
+
+    throw new Error(`Registry lookup failed (${res.status})`);
   }
-  return null;
+
+  return { status: "notfound" };
 }
 
 export function eventDate(data, action) {

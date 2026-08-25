@@ -102,8 +102,9 @@
           dns(host, "A"),
           dns(host, "AAAA"),
         ]);
-        const registration = settled(reg);
-        const mailDomain = registration ? registration.domain : host;
+        const lookup = settled(reg);
+        const registration = lookup && lookup.status === "found" ? lookup : null;
+        const mailDomain = lookup && lookup.domain ? lookup.domain : host;
 
         const [mx, ns, txt, dmarc] = await Promise.allSettled([
           dns(mailDomain, "MX"),
@@ -121,7 +122,14 @@
 
         els.registration.replaceChildren();
         if (reg.status === "rejected") {
+          // A failed lookup taught us nothing. Saying nothing here let the counter see
+          // zero flags and render the reassuring verdict on every domain.
           row(els.registration, "Status", "Registry lookup failed — " + reg.reason.message);
+          findings.push({ level: "warn", headline: "Registration could not be checked", detail: "the registry lookup failed, so domain age and registrar are unknown here. This is not a clean result." });
+        } else if (lookup && lookup.status === "unsupported") {
+          // No RDAP service for this TLD — .de and .at among them. Not evidence of anything.
+          row(els.registration, "Status", "This registry publishes no lookup service");
+          findings.push({ level: "info", headline: "Registration cannot be checked for this domain ending", detail: "the registry for this top-level domain does not publish records, so age and registrar are unknown. Nothing here is a warning sign." });
         } else if (!registration) {
           row(els.registration, "Status", "No registry record found");
           findings.push({ level: "bad", headline: "Not registered", detail: "no registry has a record for this name. Check the spelling." });
