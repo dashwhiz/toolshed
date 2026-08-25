@@ -96,3 +96,15 @@ crowded the section without saying more than one row would.
 The rule in ROADMAP.md and the daily prompt both said to add an entry per tool, so both were
 corrected — otherwise the next run would have quietly undone this.
 
+Tools now run only when their button is pressed. `link`, `injection-scan` and `unicode` were
+re-running on every keystroke, so a verdict could be rendered against half-typed input — the
+worst possible behaviour in a tool someone consults about trust. `unicode` had no button at
+all and gained one. Editing a field after a result now invalidates it rather than leaving a
+verdict on screen that describes different text; `bindSubmitEnabled` takes an `onEdit`
+callback so the rule lives in one place. Recorded in DESIGN.md.
+
+Dropped the "developer utilities" framing from the site title, the meta description, the
+README and the portfolio blurb. These get used for questions anyone can have — is this site
+real, where does this link go — and describing them as developer tooling undersold who they
+are for.
+
