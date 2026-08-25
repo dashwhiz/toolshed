@@ -39,9 +39,9 @@
         <button id="sample" class="secondary" type="button">Try an example</button>
         <button id="clear" class="secondary" type="button">Clear</button>
       </div>
-      <p class="note" id="status">Nothing is uploaded. The parsing happens in this page.</p>
+      <p class="note" id="status" role="status" aria-live="polite">Nothing is uploaded. The parsing happens in this page.</p>
 
-      <div id="results" hidden>
+      <div id="results" aria-live="polite" hidden>
         <p class="label">Notes</p>
         <ul class="findings" id="findings"></ul>
 

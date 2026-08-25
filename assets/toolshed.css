@@ -113,7 +113,24 @@ h1 {
 a.card { border-color: var(--line-strong); transition: border-color 160ms ease; }
 a.card:hover { border-color: var(--accent); }
 a.card:hover .card-state .icon { transform: translateX(2px); }
-a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a.card:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Announced by screen readers, invisible on screen. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .card--pending { border-style: dashed; }
 
 .card-head {

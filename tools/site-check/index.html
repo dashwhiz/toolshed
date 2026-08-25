@@ -31,11 +31,11 @@
         />
         <button id="go" type="submit">Check</button>
       </form>
-      <p class="note" id="status">
+      <p class="note" id="status" role="status" aria-live="polite">
         Uses public registration and DNS data. No account, no key, nothing stored.
       </p>
 
-      <div id="results" hidden>
+      <div id="results" aria-live="polite" hidden>
         <div class="verdict" id="verdict"></div>
 
         <p class="label">What stood out</p>
@@ -67,6 +67,7 @@
         parseHost, toUnicode, dns, rdap, eventDate, registrarName,
         describeAge, fmtDate, DAY,
       } from "../../assets/domain.js";
+      import { scanText } from "../../assets/scan.js";
 
       const els = {
         form: document.getElementById("form"),
@@ -85,11 +86,14 @@
         const findings = [];
         const unicode = toUnicode(host);
         if (unicode !== host) {
-          findings.push({
-            level: "bad",
-            headline: "Domain uses non-Latin characters",
-            detail: `reads as “${unicode}”. Letters that look like ASCII are a common way to impersonate a familiar name.`,
-          });
+          // münchen.de is an ordinary German domain. Calling every IDN an attack was
+          // both wrong and trained people to dismiss the case that matters.
+          const lookalikes = scanText(unicode).groups.filter((g) => g.level === "bad");
+          findings.push(
+            lookalikes.length
+              ? { level: "bad", headline: "Domain imitates another name", detail: `reads as “${unicode}”. ${lookalikes[0].detail}` }
+              : { level: "info", headline: "Domain uses non-Latin letters", detail: `reads as “${unicode}”. Normal for a domain in that language.` },
+          );
         }
 
         const settled = (r) => (r.status === "fulfilled" ? r.value : null);
@@ -175,7 +179,10 @@
 
         const mailServers = settled(mx)?.records || [];
         row(els.dns, "Mail servers", mailServers.length ? mailServers.join(", ") : "none", true);
-        if (!mailServers.length) {
+        const nullMx = mailServers.length === 1 && /^0\s+\.?$/.test(mailServers[0].trim().replace(/\.$/, ""));
+        if (nullMx) {
+          findings.push({ level: "info", headline: "States that it accepts no mail", detail: `a null MX record on ${mailDomain} — the domain declares it receives no email. Deliberate, not a fault.` });
+        } else if (!mailServers.length) {
           findings.push({ level: "warn", headline: "Accepts no mail", detail: `no MX record on ${mailDomain}, so nobody can email it. Unusual for a real business.` });
         }
 

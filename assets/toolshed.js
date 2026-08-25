@@ -94,6 +94,14 @@ export function renderFindings(list, findings) {
     const li = document.createElement("li");
     li.className = "finding";
     const text = document.createElement("span");
+
+    // The icon is aria-hidden and the colour carries no meaning to a screen reader,
+    // so a warning and a clean result read identically without this.
+    const label = document.createElement("span");
+    label.className = "sr-only";
+    label.textContent = { good: "Good: ", warn: "Warning: ", bad: "Problem: ", info: "Note: " }[level] || "";
+    text.append(label);
+
     const strong = document.createElement("b");
     strong.textContent = headline;
     text.append(strong);
