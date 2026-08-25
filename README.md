@@ -5,7 +5,11 @@ an email actually go, what is hidden in this text. Built one at a time, as I or 
 me needed them.
 
 Each one is a single static page — no build step, no backend, no API keys, no accounts.
-Everything runs in your browser.
+
+The tools that only inspect text — `json`, `unicode`, `injection-scan`, `link` — never send
+what you paste anywhere. The domain tools — `site-check`, `dns`, `email-auth` — look the
+domain up against public DNS, RDAP and IP-info services, because that is the question they
+answer; nothing else is transmitted.
 
 **Live: https://dashwhiz.github.io/toolshed/**
 
