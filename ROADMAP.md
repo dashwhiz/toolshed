@@ -100,4 +100,7 @@ The rest of the table is unordered.
 - Verify a tool works in the browser before marking it `shipped`.
 - Follow [`DESIGN.md`](DESIGN.md). No emoji, no in-page nav, one background colour.
 - Shipped tools get an entry in the `TOOLS` array in `index.html`.
-- When a tool ships, add it to `shipped` in the portfolio's `content/profile.ts` and push that repo too, then mark the row `on-portfolio`.
+- The portfolio carries ONE `shipped` entry for Toolshed as a whole, never one per tool.
+  When a tool ships, do not add an entry. Update the existing Toolshed blurb only if the new
+  tool changes what the collection is for, keep its `stack` list to what is actually used,
+  push that repo, then mark the row `on-portfolio`.

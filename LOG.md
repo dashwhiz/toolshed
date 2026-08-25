@@ -89,3 +89,10 @@ stays unknown. That is stated first in the caveats rather than buried.
 
 `link` is on-portfolio; portfolio build and lint exit 0. Next: `jwt`, then `ip`, then `cert`.
 
+Collapsed the portfolio's `shipped` list from six per-tool entries down to one Toolshed
+entry linking to the collection. Six near-identical rows, all pointing at the same repo,
+crowded the section without saying more than one row would.
+
+The rule in ROADMAP.md and the daily prompt both said to add an entry per tool, so both were
+corrected — otherwise the next run would have quietly undone this.
+
