@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Link inspector — Toolshed</title>
+    <meta
+      name="description"
+      content="Paste a link and see where it actually goes: unwrapped from mail-filter redirects, decoded from punycode, stripped of tracking."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main>
+      <h1>Link inspector</h1>
+      <p class="lede">
+        Where does this link actually go? Unwraps the redirect your mail filter wrapped it in,
+        decodes a domain written in another alphabet, and shows what the tracking parameters
+        are reporting about you.
+      </p>
+
+      <textarea
+        id="input"
+        placeholder="Paste a link — including the long ones from email"
+        aria-label="Link to inspect"
+        spellcheck="false"
+      ></textarea>
+      <div class="actions">
+        <button id="go" type="button">Inspect</button>
+        <button id="sample" class="secondary" type="button">Try an example</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <p class="note" id="status">Nothing is uploaded. The link is taken apart in this page.</p>
+
+      <div id="results" hidden>
+        <div class="verdict" id="verdict"></div>
+
+        <p class="label">What stood out</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Where it goes</p>
+        <dl id="destination"></dl>
+
+        <div id="chain-section" hidden>
+          <p class="label">Unwrapped from</p>
+          <dl id="chain"></dl>
+        </div>
+
+        <div id="tracking-section" hidden>
+          <p class="label">Tracking removed</p>
+          <pre class="output" id="cleaned"></pre>
+          <div class="actions">
+            <button id="copy" type="button">Copy clean link</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>It cannot follow the link. A shortener like bit.ly, or any server-side redirect, hides its destination behind a request this page is not allowed to make — so the final address may still be somewhere else entirely.</li>
+          <li>Some wrappers, Mimecast among them, replace the address with an opaque identifier. There is nothing in the link left to decode.</li>
+          <li>A clean, plainly spelled link to a real domain can still be a scam. This describes the address, not the site behind it.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { toUnicode } from "../../assets/domain.js";
+      import { scanText } from "../../assets/scan.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        findings: document.getElementById("findings"),
+        destination: document.getElementById("destination"),
+        chainSection: document.getElementById("chain-section"),
+        chain: document.getElementById("chain"),
+        trackingSection: document.getElementById("tracking-section"),
+        cleaned: document.getElementById("cleaned"),
+        copy: document.getElementById("copy"),
+        go: document.getElementById("go"),
+        sample: document.getElementById("sample"),
+        clear: document.getElementById("clear"),
+      };
+
+      const SAMPLE =
+        "https://eur02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.xn--80ak6aa92e.com%2Faccount%2Fverify%3Futm_source%3Dnewsletter%26utm_campaign%3Dq3%26mc_eid%3D7f3a91c2b8&data=05%7C01%7C&sdata=x%2F&reserved=0";
+
+      // Parameters that report on you. The ones marked personal single you out rather
+      // than the campaign, which is the meaningful difference.
+      const TRACKERS = {
+        utm_source: "which channel sent you", utm_medium: "the channel type",
+        utm_campaign: "which campaign", utm_term: "the keyword", utm_content: "which variant",
+        gclid: "Google Ads click", dclid: "Google Display click", gbraid: "Google Ads click",
+        wbraid: "Google Ads click", msclkid: "Microsoft Ads click", fbclid: "Facebook click",
+        ttclid: "TikTok click", twclid: "X click", igshid: "Instagram share",
+        yclid: "Yandex click", li_fat_id: "LinkedIn click", epik: "Pinterest click",
+        mc_cid: "Mailchimp campaign", ef_id: "Adobe click", s_cid: "campaign id",
+        pk_campaign: "Matomo campaign", pk_kwd: "Matomo keyword", _ga: "Google Analytics id",
+      };
+      const PERSONAL = {
+        mc_eid: "identifies your individual email address in the send list",
+        _hsenc: "identifies you personally to HubSpot",
+        _hsmi: "identifies the individual message sent to you",
+        vero_id: "identifies you personally to Vero",
+        oly_enc_id: "identifies you personally", oly_anon_id: "identifies your browser",
+        rb_clickid: "identifies this click back to you",
+      };
+
+      const SHORTENERS = new Set([
+        "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "buff.ly", "is.gd",
+        "rebrand.ly", "cutt.ly", "t.ly", "shorturl.at", "lnkd.in", "rb.gy", "shorte.st",
+      ]);
+
+      const looksLikeUrl = (v) => /^https?:\/\//i.test(v);
+
+      /** Peels one layer of redirect wrapper. Returns null when there is nothing to peel. */
+      function peel(url) {
+        let u;
+        try { u = new URL(url); } catch { return null; }
+        const host = u.hostname.toLowerCase();
+        const param = (name) => u.searchParams.get(name);
+
+        if (host.endsWith("safelinks.protection.outlook.com")) {
+          const target = param("url");
+          if (target) return { url: target, via: "Microsoft Defender SafeLinks" };
+        }
+        if (host.endsWith("urldefense.proofpoint.com") || host.endsWith("urldefense.com")) {
+          const v3 = url.match(/\/v3\/__(.+?)__;/);
+          if (v3) return { url: decodeURIComponent(v3[1]), via: "Proofpoint URL Defense v3" };
+          const u2 = param("u");
+          if (u2) {
+            // v2 swaps - for % and _ for / before percent-encoding.
+            const decoded = decodeURIComponent(u2.replace(/-/g, "%").replace(/_/g, "/"));
+            return { url: decoded, via: "Proofpoint URL Defense v2" };
+          }
+        }
+        if (host.endsWith("linkprotect.cudasvc.com")) {
+          const target = param("a");
+          if (target) return { url: target, via: "Barracuda Link Protection" };
+        }
+        if (host.endsWith("google.com") && u.pathname === "/url") {
+          const target = param("q") || param("url");
+          if (target) return { url: target, via: "Google redirect" };
+        }
+        for (const name of ["url", "u", "target", "redirect", "redirect_url", "dest", "destination", "link", "to"]) {
+          const target = param(name);
+          if (target && looksLikeUrl(target)) {
+            return { url: target, via: `a ${name}= parameter on ${host}` };
+          }
+        }
+        return null;
+      }
+
+      function unwrap(start) {
+        const chain = [];
+        let current = start;
+        for (let i = 0; i < 8; i++) {
+          const next = peel(current);
+          if (!next) break;
+          chain.push({ from: current, via: next.via });
+          current = next.url;
+        }
+        return { final: current, chain };
+      }
+
+      function inspect(raw) {
+        const findings = [];
+        let input = raw.trim();
+
+        // The sibling tools all take a bare domain, so this one should too — but only
+        // when it actually looks like a host, not for any stray text.
+        if (!/^[a-z][a-z0-9+.-]*:/i.test(input) && /^[^\s/]+\.[^\s/]+/.test(input)) {
+          input = "https://" + input;
+        }
+
+        let { final, chain } = unwrap(input);
+        let url;
+        try {
+          url = new URL(final);
+        } catch {
+          return { error: "That is not a link this page can parse. It needs a full URL, starting with http:// or https://." };
+        }
+
+        // Scheme
+        if (/^(javascript|data|vbscript):$/i.test(url.protocol)) {
+          findings.push({ level: "bad", headline: `A ${url.protocol.replace(":", "")}: link`, detail: "this does not go to a website — it runs or embeds content. Legitimate links are almost never sent this way." });
+        } else if (url.protocol === "http:") {
+          findings.push({ level: "warn", headline: "Not encrypted", detail: "plain http, so anything you send over it can be read in transit." });
+        }
+
+        // Credentials in the authority — the classic apple.com@evil.com trick.
+        if (url.username || url.password) {
+          findings.push({
+            level: "bad",
+            headline: "The visible name is not the destination",
+            detail: `everything before the @ is ignored by the browser. This goes to ${url.hostname}, not ${url.username}.`,
+          });
+        }
+
+        // Host
+        const host = url.hostname;
+        const decoded = toUnicode(host);
+        if (decoded !== host) {
+          findings.push({ level: "bad", headline: "Domain is written in another alphabet", detail: `it reads as “${decoded}”. Punycode lets a name that looks familiar be an entirely different domain.` });
+        }
+        const confusables = scanText(decoded).groups.filter((g) => g.level === "bad");
+        if (confusables.length && decoded === host) {
+          findings.push({ level: "bad", headline: "Look-alike letters in the domain", detail: confusables[0].detail });
+        }
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[")) {
+          findings.push({ level: "warn", headline: "Points at a raw address", detail: "a bare IP rather than a domain name. Ordinary services use names." });
+        }
+        if (SHORTENERS.has(host.toLowerCase().replace(/^www\./, ""))) {
+          findings.push({ level: "warn", headline: "This is a shortener", detail: "the real destination is only known to the shortener's server, and this page cannot ask it." });
+        }
+        if (/\.mimecast\.com$/i.test(host)) {
+          findings.push({ level: "info", headline: "Mimecast wrapper", detail: "the address was replaced with an opaque identifier, so there is nothing left in the link to decode." });
+        }
+        const labels = host.split(".");
+        if (labels.length > 4) {
+          findings.push({ level: "warn", headline: `${labels.length} levels of subdomain`, detail: "a familiar name buried in subdomains belongs to whoever owns the last two labels, not the first." });
+        }
+        if (url.port && !["80", "443"].includes(url.port)) {
+          findings.push({ level: "warn", headline: `Non-standard port ${url.port}`, detail: "websites are almost always served on 443." });
+        }
+
+        // Tracking
+        const tracking = [];
+        const personal = [];
+        for (const [key] of url.searchParams) {
+          if (PERSONAL[key]) personal.push(key);
+          else if (TRACKERS[key] || /^utm_/i.test(key)) tracking.push(key);
+        }
+        if (personal.length) {
+          findings.push({
+            level: "warn",
+            headline: "Carries an identifier for you specifically",
+            detail: personal.map((k) => `${k} ${PERSONAL[k]}`).join("; ") + ". Opening it confirms you personally read the message.",
+          });
+        }
+        if (tracking.length) {
+          findings.push({ level: "info", headline: `${tracking.length} tracking parameter${tracking.length === 1 ? "" : "s"}`, detail: tracking.join(", ") + " — campaign attribution. Safe to delete." });
+        }
+        if (chain.length) {
+          findings.push({ level: "info", headline: `Wrapped in ${chain.length} redirect${chain.length === 1 ? "" : "s"}`, detail: chain.map((c) => c.via).join(", ") + ". Normal for mail that passed a filter." });
+        }
+
+        const clean = new URL(url.href);
+        for (const key of [...tracking, ...personal]) clean.searchParams.delete(key);
+
+        return { url, decoded, chain, findings, tracking, personal, clean, input };
+      }
+
+      function run() {
+        const raw = els.input.value;
+        if (!raw.trim()) {
+          els.results.hidden = true;
+          els.status.textContent = "Nothing is uploaded. The link is taken apart in this page.";
+          return;
+        }
+
+        const result = inspect(raw);
+        if (result.error) {
+          els.results.hidden = true;
+          els.status.textContent = result.error;
+          return;
+        }
+
+        const { url, decoded, chain, findings, tracking, personal, clean } = result;
+
+        els.destination.replaceChildren();
+        row(els.destination, "Final address", url.href, true);
+        row(els.destination, "Domain", url.hostname, true);
+        if (decoded !== url.hostname) row(els.destination, "Which reads as", decoded, true);
+        row(els.destination, "Scheme", url.protocol.replace(":", ""));
+        if (url.username) row(els.destination, "Ignored before the @", url.username, true);
+        if (url.port) row(els.destination, "Port", url.port, true);
+        row(els.destination, "Path", url.pathname + (url.hash || ""), true);
+
+        els.chain.replaceChildren();
+        els.chainSection.hidden = chain.length === 0;
+        chain.forEach((link, i) => row(els.chain, `Layer ${i + 1} — ${link.via}`, link.from, true));
+
+        const removed = tracking.length + personal.length;
+        els.trackingSection.hidden = removed === 0;
+        els.cleaned.textContent = clean.href;
+
+        renderFindings(els.findings, findings);
+
+        const bad = findings.filter((f) => f.level === "bad").length;
+        const warn = findings.filter((f) => f.level === "warn").length;
+        if (bad) {
+          renderVerdict(els.verdict, "bad", "This link is not what it appears to be",
+            "The address disguises where it goes. Do not open it from here — reach the site the way you normally would.");
+        } else if (warn >= 2) {
+          renderVerdict(els.verdict, "warn", "Several things worth checking",
+            "Nothing conclusive, but more than one detail here is unusual for an ordinary link.");
+        } else if (warn) {
+          renderVerdict(els.verdict, "warn", "One thing to note",
+            "Read the finding below and judge it against where you expected this to go.");
+        } else {
+          renderVerdict(els.verdict, "good", "The address is plainly written",
+            `It goes to ${url.hostname}, spelled in ordinary letters. That is not a statement about the site itself.`);
+        }
+
+        els.results.hidden = false;
+        els.status.textContent = `Goes to ${url.hostname}${removed ? `, ${removed} tracking parameter${removed === 1 ? "" : "s"} removable` : ""}. Nothing was uploaded.`;
+      }
+
+      bindSubmitEnabled(els.input, els.go);
+      els.go.addEventListener("click", run);
+      els.input.addEventListener("input", run);
+      els.sample.addEventListener("click", () => {
+        els.input.value = SAMPLE;
+        els.input.dispatchEvent(new Event("input"));
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.input.focus();
+      });
+      els.copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(els.cleaned.textContent);
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy clean link"; }, 1500);
+      });
+    </script>
+  </body>
+</html>
