@@ -313,16 +313,24 @@
         els.status.textContent = `Goes to ${url.hostname}${removed ? `, ${removed} tracking parameter${removed === 1 ? "" : "s"} removable` : ""}. Nothing was uploaded.`;
       }
 
-      bindSubmitEnabled(els.input, els.go);
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Inspect to check this link.";
+      }
+
+      bindSubmitEnabled(els.input, els.go, invalidate);
       els.go.addEventListener("click", run);
-      els.input.addEventListener("input", run);
       els.sample.addEventListener("click", () => {
         els.input.value = SAMPLE;
         els.input.dispatchEvent(new Event("input"));
+        run();
       });
       els.clear.addEventListener("click", () => {
         els.input.value = "";
         els.input.dispatchEvent(new Event("input"));
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. The link is taken apart in this page.";
         els.input.focus();
       });
       els.copy.addEventListener("click", async () => {

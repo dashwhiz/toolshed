@@ -72,6 +72,12 @@ div.caveats        what this tool cannot tell you. Required on anything that jud
 
 ## Controls
 
+A tool runs when its button is pressed, never while someone types. Live results mean a
+verdict rendered against half-typed input, which in a tool people consult about trust is
+worse than no result. Editing a field after a result invalidates it — pass an `onEdit`
+callback to `bindSubmitEnabled` that hides the results and says which button to press.
+A result must never describe anything other than what is currently in the field.
+
 A submit button stays disabled while its field is empty — wire it with `bindSubmitEnabled`
 from `assets/toolshed.js`, and call the sync function it returns when an in-flight request
 finishes rather than setting `disabled = false`. Whitespace counts as empty. Pressing a

@@ -27,6 +27,7 @@
         spellcheck="false"
       ></textarea>
       <div class="actions">
+        <button id="go" type="button">Scan</button>
         <button id="sample" class="secondary" type="button">Try an example</button>
         <button id="clear" class="secondary" type="button">Clear</button>
       </div>
@@ -59,7 +60,7 @@
     </main>
 
     <script type="module">
-      import { renderVerdict, renderFindings, countBy } from "../../assets/toolshed.js";
+      import { renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
       import { scanText, cleanText } from "../../assets/scan.js";
 
       const els = {
@@ -70,6 +71,7 @@
         findings: document.getElementById("findings"),
         cleaned: document.getElementById("cleaned"),
         copy: document.getElementById("copy"),
+        go: document.getElementById("go"),
         sample: document.getElementById("sample"),
         clear: document.getElementById("clear"),
       };
@@ -122,9 +124,25 @@
         els.status.textContent = `${chars} character${chars === 1 ? "" : "s"} scanned in this page. Nothing was uploaded.`;
       }
 
-      els.input.addEventListener("input", run);
-      els.sample.addEventListener("click", () => { els.input.value = SAMPLE; run(); });
-      els.clear.addEventListener("click", () => { els.input.value = ""; els.input.focus(); run(); });
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Scan to check this text.";
+      }
+
+      bindSubmitEnabled(els.input, els.go, invalidate);
+      els.go.addEventListener("click", run);
+      els.sample.addEventListener("click", () => {
+        els.input.value = SAMPLE;
+        els.input.dispatchEvent(new Event("input"));
+        run();
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.input.focus();
+        run();
+      });
       els.copy.addEventListener("click", async () => {
         await navigator.clipboard.writeText(els.cleaned.textContent);
         els.copy.textContent = "Copied";

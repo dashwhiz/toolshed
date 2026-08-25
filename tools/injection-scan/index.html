@@ -259,11 +259,25 @@
         els.status.textContent = `Scanned ${[...raw].length} characters in this page. Nothing was uploaded.`;
       }
 
-      bindSubmitEnabled(els.input, els.scan);
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Scan to check this content.";
+      }
+
+      bindSubmitEnabled(els.input, els.scan, invalidate);
       els.scan.addEventListener("click", run);
-      els.input.addEventListener("input", run);
-      els.sample.addEventListener("click", () => { els.input.value = SAMPLE; run(); });
-      els.clear.addEventListener("click", () => { els.input.value = ""; els.input.focus(); run(); });
+      els.sample.addEventListener("click", () => {
+        els.input.value = SAMPLE;
+        els.input.dispatchEvent(new Event("input"));
+        run();
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.input.focus();
+        run();
+      });
     </script>
   </body>
 </html>

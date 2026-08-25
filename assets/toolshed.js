@@ -119,9 +119,14 @@ export function countBy(findings, level) {
  * can do with a blank form is nothing — rather than press it and read an error.
  * Returns the sync function, for re-enabling after an in-flight request finishes.
  */
-export function bindSubmitEnabled(field, button) {
+export function bindSubmitEnabled(field, button, onEdit) {
   const sync = () => { button.disabled = !field.value.trim(); };
-  field.addEventListener("input", sync);
+  field.addEventListener("input", () => {
+    sync();
+    // Typing never runs the tool — it only invalidates whatever is on screen, so a
+    // result can never describe anything other than the text currently in the field.
+    if (onEdit) onEdit();
+  });
   sync();
   return sync;
 }
