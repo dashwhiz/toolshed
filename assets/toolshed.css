@@ -201,7 +201,7 @@ textarea {
   color: var(--fg);
   font: inherit;
   line-height: 1.55;
-  resize: vertical;
+  resize: none;
 }
 textarea::placeholder { color: var(--muted); }
 textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -224,8 +224,16 @@ button.secondary:hover { border-color: var(--accent); }
   text-transform: uppercase;
   color: var(--muted);
 }
-.panes textarea { margin-top: 0; min-height: 22rem; flex: 1; }
-.panes .output { min-height: 22rem; overflow: auto; flex: 1; }
+/* Both panes are a fixed height and scroll inside themselves. Letting them grow with
+   the content pushes the buttons off the bottom of a long document. */
+.panes textarea,
+.panes .output {
+  margin-top: 0;
+  height: clamp(18rem, 55vh, 34rem);
+  min-height: 0;
+  flex: none;
+  overflow: auto;
+}
 
 /* JSON tokens. Foreground only — the background never changes. */
 .t-key { color: var(--fg); }

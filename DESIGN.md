@@ -78,6 +78,11 @@ column to 72rem and takes the footer with it so the rule underneath lines up. Ev
 else stays at the 46rem reading width — do not widen a page just because it has a lot of
 output. Panes collapse to one column below 52rem.
 
+Both panes are a fixed height and scroll inside themselves. A pane that grows with its
+content pushes the buttons and the results off the bottom of the page, so a large document
+leaves nothing to press. Textareas carry `resize: none` — a drag handle in the corner is
+visual noise, and it contradicts a pane whose height is deliberately fixed.
+
 ## Controls
 
 A tool runs when its button is pressed, never while someone types. Live results mean a

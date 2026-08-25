@@ -90,6 +90,10 @@ stays unknown. That is stated first in the caveats rather than buried.
 `link` is on-portfolio; portfolio build and lint exit 0. The portfolio needed no change — its single Toolshed entry already covers whatever ships
 here, which is the point of collapsing it. Marked `on-portfolio` without touching that repo.
 
+Gave the JSON panes a fixed height that scrolls internally. They had been growing with
+their content, so a 6,000-line document made the page 150,000px tall and pushed every button
+and the results below the fold. Also removed the drag handle from every textarea.
+
 Next: `jwt`, then `ip`, then `cert`.
 
 Collapsed the portfolio's `shipped` list from six per-tool entries down to one Toolshed
@@ -144,5 +148,9 @@ does not appear, serve on a new port rather than trusting a reload.
 
 The portfolio needed no change — its single Toolshed entry already covers whatever ships
 here, which is the point of collapsing it. Marked `on-portfolio` without touching that repo.
+
+Gave the JSON panes a fixed height that scrolls internally. They had been growing with
+their content, so a 6,000-line document made the page 150,000px tall and pushed every button
+and the results below the fold. Also removed the drag handle from every textarea.
 
 Next: `jwt`, then `ip`, then `cert`.
