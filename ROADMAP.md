@@ -13,16 +13,30 @@ pasting a URL into it, and doing it again for the next question. The tools that 
 network use public endpoints that allow browser calls and need no key. The rest never send
 anything anywhere — which is the point, because you paste tokens and certs into them.
 
+## When a tool earns a page
+
+The bar is not "is this useful" — it is "would I open this instead of asking an AI". A page
+wins when at least one of these holds:
+
+1. **It handles a secret.** A JWT, a certificate, a base64'd credential. Pasting those into a
+   chat is a bad habit; a local page removes the excuse.
+2. **You do it constantly.** Opening a chat is more friction than the task itself.
+3. **The input is bulk.** Thousands of lines cost tokens and patience.
+4. **It needs live external data.** DNS, RDAP, IP ownership — a model cannot fetch these.
+5. **It is interactive.** Nudge a value and watch it change.
+
+An AI wins when the job is one-off, wants judgement or an explanation, carries no secret, and
+the input is small. Anything scoring nothing on the list above belongs in Parked.
+
 ## Check something out there
 
 Needs the network. Only uses endpoints that send `Access-Control-Allow-Origin: *`.
 
 | Tool | Slug | Status | Notes |
 | --- | --- | --- | --- |
-| Website trust check | `site-check` | on-portfolio | Flagship. URL in → domain age, registrar, DNS, host, plain-English verdict with the red flags named |
+| Website trust check | `site-check` | on-portfolio | Flagship. URL in → domain age, registrar, DNS, host, plain-English verdict with the red flags named. Owns IP/ASN detail too — owner, network, datacenter vs residential — rather than a second page for it |
 | DNS records | `dns` | on-portfolio | A/AAAA/MX/NS/TXT/CAA/SOA over DoH, pick resolver |
 | Email spoofability | `email-auth` | on-portfolio | SPF + DMARC + DKIM + MX for a domain — could someone forge mail from it? |
-| IP & ASN lookup | `ip` | idea | Owner, network, country, datacenter vs residential |
 
 ## Inspect something you were sent
 
@@ -64,7 +78,6 @@ Note in `.caveats` that a site can serve the agent different content than it ser
 | Encode/decode bench | `encode` | idea | Base64, URL, HTML entities. Text and file input |
 | Text bench | `text` | idea | Case convert, sort, dedupe, trim, count — bulk lines |
 | Colour contrast | `contrast` | idea | WCAG AA/AAA, suggest nearest passing shade |
-| Cron explainer | `cron` | idea | Plain-English + next 5 run times |
 
 ## Verified data sources
 
@@ -82,6 +95,10 @@ without a backend. Do not promise it on any page.
 
 Cut deliberately. Recorded so they don't get re-added by accident.
 
+- Cron explainer — the clearest loss to just asking. One-off, wants an explanation rather
+  than an answer, no secret, tiny input. A model says what it means *and* why.
+- IP & ASN lookup — a real question, but a sub-feature of `site-check`, which already reports
+  hosting. Folded in there rather than a second page to remember.
 - HTTP status reference, query string builder, duration/bytes humanizer — a search or one
   devtools line beats them. Not worth a page.
 - SVG optimiser — real optimisation is SVGO. A naive version you can't trust is worse than none.
@@ -92,8 +109,17 @@ Cut deliberately. Recorded so they don't get re-added by accident.
 
 ## Next up
 
-Build order when nothing is `building`: `jwt`, then `ip`, then `cert`.
-The rest of the table is unordered.
+Build in this order when nothing is `building`. Ordered by how badly a page beats asking,
+not by how interesting the tool is:
+
+1. `jwt` — secret-bearing and frequent. The archetype for this collection.
+2. `encode` — highest frequency on the list, and base64 is how credentials travel.
+3. `timestamp` — ten times a day, zero judgement needed.
+4. `ids` — `crypto.randomUUID()` is a CSPRNG; a model-generated UUID only looks random.
+5. `text` — the bulk case.
+6. `contrast` — the interactive case.
+7. `hash` — right for files you would never upload to a chat, but infrequent.
+8. `cert` — same secret argument as `jwt`, much rarer.
 
 ## Rules
 
