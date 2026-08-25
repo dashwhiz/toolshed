@@ -66,5 +66,26 @@ an inset `-webkit-box-shadow` can, so the single-background rule survives.
 Confirmed the reported input was never broken: `admin@unicorn.com` parses to `unicorn.com`
 and checks fine. The stale error message was the empty-click bug.
 
-Both rules are now in DESIGN.md. Next: `link`, then `jwt`, then `ip`.
+Both rules are now in DESIGN.md.
+
+Then shipped `link`, the link inspector. It peels Microsoft SafeLinks, Proofpoint v2 and v3,
+Barracuda and Google redirects, plus any generic `url=` style parameter, up to eight layers
+deep. Reuses `toUnicode` for punycode and `scanText` for look-alike letters rather than
+restating either.
+
+The distinction worth keeping: tracking parameters are split into campaign attribution
+(`utm_*`, `gclid`) and ones that identify the recipient personally (`mc_eid`, `_hsenc`,
+`vero_id`). Only the second kind confirms that *you* opened the message, and that is the
+one people care about.
+
+Verified against the credentials trick (`apple.com@203.0.113.9` correctly resolves to the
+IP, not the visible name), a seven-level subdomain, Proofpoint v3, plain http, a shortener,
+and ordinary links which come back clean. Bare domains are accepted like the sibling tools,
+while genuine non-links are still rejected. Mobile clean at 360 and 390 with a very long
+wrapped URL on screen.
+
+It cannot follow redirects — CORS forbids the request — so a shortener's real destination
+stays unknown. That is stated first in the caveats rather than buried.
+
+`link` is on-portfolio; portfolio build and lint exit 0. Next: `jwt`, then `ip`, then `cert`.
 
