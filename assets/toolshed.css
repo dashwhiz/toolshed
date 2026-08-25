@@ -40,6 +40,10 @@ body {
 }
 
 main { flex: 1 0 auto; width: 100%; max-width: 46rem; margin: 0 auto; }
+/* Two-pane tools need room for both panes; everything else stays at reading width. */
+main.wide { max-width: 72rem; }
+/* The footer rule must line up with the content above it, not stop short of it. */
+body:has(main.wide) .site-footer { max-width: 72rem; }
 
 a { color: var(--accent); }
 
@@ -208,6 +212,27 @@ button.secondary { background: none; border: 1px solid var(--line-strong); color
 button.secondary:hover { border-color: var(--accent); }
 @media (max-width: 30rem) { .actions { flex-direction: column; } .actions button { width: 100%; } }
 
+/* Two-pane tools: paste on the left, result on the right. */
+.panes { display: grid; gap: 0.875rem; margin-top: 2rem; }
+@media (min-width: 52rem) { .panes { grid-template-columns: 1fr 1fr; } }
+.pane { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.pane-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.panes textarea { margin-top: 0; min-height: 22rem; flex: 1; }
+.panes .output { min-height: 22rem; overflow: auto; flex: 1; }
+
+/* JSON tokens. Foreground only — the background never changes. */
+.t-key { color: var(--fg); }
+.t-str { color: var(--accent); }
+.t-num { color: var(--warn); font-variant-numeric: tabular-nums; }
+.t-lit { color: var(--muted); }
+
 /* Read-only output people copy out of. */
 .output {
   margin: 0;
@@ -280,14 +305,25 @@ dd.data { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
   width: 100%;
   max-width: 46rem;
   margin: 4rem auto 0;
-  padding-top: 4rem;
+  padding-top: 3rem;
   border-top: 1px solid var(--line);
+  color: var(--muted);
+  text-align: center;
+}
+.site-footer-note {
+  margin: 0 auto;
+  max-width: 30rem;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+.site-footer-links {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   gap: 0.5rem 0.75rem;
-  color: var(--muted);
+  margin: 1.5rem 0 0;
   font-size: 0.75rem;
 }
 /* Quiet by default, lifts to full contrast on hover — matches the portfolio footer. */

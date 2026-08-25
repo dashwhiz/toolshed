@@ -47,9 +47,9 @@ Tones map to meaning, not decoration: `good` (accent), `warn`, `bad`, `info` (mu
 renders the footer. A page must not restate either — if a page needs a style that another
 page will also need, it belongs in the stylesheet.
 
-The footer is `Toolshed · Source · What's next · Report a problem` and nothing more. Do not
-add a privacy note there — it belongs in the page body where it is read — and do not link out
-to anything that is not this project.
+The footer is a short paragraph about what this is, then a row of links: `All tools` (pages
+below the root only) `· Source · What's next · Report a problem`. Both are centred. Do not
+link out to anything that is not this project, and do not add more rows.
 
 It follows the portfolio's footer: centered, generous padding above a `--line` rule, 0.75rem
 muted text, links underlined at a 4px offset that lift to `--fg` on hover, `·` separators in
@@ -70,6 +70,13 @@ p.note#status      live state — what was checked, what failed
 #results           hidden until there is something to show
 div.caveats        what this tool cannot tell you. Required on anything that judges.
 ```
+
+## Wide tools
+
+A tool with two panes side by side opts in with `<main class="wide">`, which widens the
+column to 72rem and takes the footer with it so the rule underneath lines up. Everything
+else stays at the 46rem reading width — do not widen a page just because it has a lot of
+output. Panes collapse to one column below 52rem.
 
 ## Controls
 

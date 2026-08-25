@@ -43,21 +43,32 @@ export function renderFooter() {
   const footer = document.createElement("footer");
   footer.className = "site-footer";
 
+  const blurb = document.createElement("p");
+  blurb.className = "site-footer-note";
+  blurb.textContent =
+    "Built one at a time, for questions that came up once and then kept coming up. " +
+    "Every page here is a single file with no accounts, no tracking and no server — " +
+    "whatever you paste stays in this browser.";
+
+  const links = document.createElement("p");
+  links.className = "site-footer-links";
+
   // Deep links (a bookmark, a shared URL) have no history to go back to, so every page
   // below the root carries the wordmark home. Set data-home on <body> to switch it on.
   const home = document.body.dataset.home;
-  if (home) footer.append(link(home, "Toolshed"), separator());
+  if (home) links.append(link(home, "All tools"), separator());
 
-  footer.append(
+  links.append(
     link("https://github.com/dashwhiz/toolshed", "Source"),
     separator(),
     link("https://github.com/dashwhiz/toolshed/blob/main/ROADMAP.md", "What's next"),
     separator(),
     link("https://github.com/dashwhiz/toolshed/issues", "Report a problem"),
   );
+
+  footer.append(blurb, links);
   document.body.append(footer);
 }
-
 
 /* Result rendering, shared by every tool that reports findings. ---------------- */
 

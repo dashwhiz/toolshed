@@ -113,3 +113,31 @@ Footer no longer links out to the portfolio. It now carries Toolshed, Source, Wh
 what a visitor standing on one of these pages would actually want next. "What's next" also
 explains the SOON cards on the landing page, which previously had nothing behind them.
 
+## 2026-08-25 (later)
+Shipped `json`, a two-pane formatter. Paste left, read right.
+
+Wrote a tolerant parser rather than calling `JSON.parse`, which buys three things that
+parser cannot give: long numbers keep their exact digits (`JSON.parse` silently rounds
+900719925474099321 to ...300), duplicate keys are reported instead of the earlier value
+vanishing without trace, and a syntax error reports the line and column it actually failed
+at. It also repairs single quotes, unquoted keys, trailing commas and comments.
+
+Double-encoded input is unwrapped up to five layers, and the result is kept only if it
+reaches an object or array — so a document that is legitimately just a string is returned
+untouched. The first version got this wrong: it trimmed surrounding text before unwrapping,
+which ate the outer quotes and left the escapes behind as literal characters.
+
+Highlighting builds one HTML string and is skipped above 300k characters, because the usual
+node-per-token approach is what makes other formatters lock up a tab on a large file.
+
+Two-pane tools opt into `<main class="wide">` at 72rem, footer included so the rule lines up.
+Everything else stays at reading width.
+
+Footer reworked again: a short paragraph about what this is, then the links. A bare row of
+links was correct and dull.
+
+Note for the next session: the local server caches aggressively during editing. If a change
+does not appear, serve on a new port rather than trusting a reload.
+
+Next: `jwt`, then `ip`, then `cert`.
+

@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JSON formatter — Toolshed</title>
+    <meta
+      name="description"
+      content="Paste a big JSON blob and read it. Formats, minifies, keeps long numbers exact and points at the character where broken JSON goes wrong."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main class="wide">
+      <h1>JSON formatter</h1>
+      <p class="lede">
+        Paste it on the left, read it on the right. Built for the big unreadable blob you
+        just copied out of somewhere — and it will tell you the things a normal parser
+        changes without mentioning: a duplicate key, a number too long to survive.
+      </p>
+
+      <div class="panes">
+        <div class="pane">
+          <span class="pane-label">Paste</span>
+          <textarea id="input" spellcheck="false" aria-label="JSON to format"
+            placeholder="{&quot;paste&quot;: &quot;anything json-shaped&quot;}"></textarea>
+        </div>
+        <div class="pane">
+          <span class="pane-label">Formatted</span>
+          <pre class="output" id="output" aria-live="polite"></pre>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="go" type="button">Format</button>
+        <button id="minify" class="secondary" type="button">Minify</button>
+        <button id="copy" class="secondary" type="button">Copy</button>
+        <button id="sample" class="secondary" type="button">Try an example</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <p class="note" id="status">Nothing is uploaded. The parsing happens in this page.</p>
+
+      <div id="results" hidden>
+        <p class="label">Notes</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">What is in it</p>
+        <dl id="stats"></dl>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>Repair is a best guess. When a value is unquoted, its end has to be inferred — a bare value containing a comma or a brace will be split in the wrong place. Valid JSON is always parsed exactly; only broken input is guessed at.</li>
+          <li>A duplicate key cannot be kept. JSON has no way to express two, so the last one wins, exactly as every parser does. The warning is there because the earlier value is gone silently otherwise.</li>
+          <li>Formatting says nothing about whether the data is correct, only that it parses.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        output: document.getElementById("output"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        findings: document.getElementById("findings"),
+        stats: document.getElementById("stats"),
+        go: document.getElementById("go"),
+        minify: document.getElementById("minify"),
+        copy: document.getElementById("copy"),
+        sample: document.getElementById("sample"),
+        clear: document.getElementById("clear"),
+      };
+
+      const SAMPLE =
+        '{"requestId":900719925474099321,"status":"ok","page":{"number":1,"size":25,"total":1284},' +
+        '"results":[{"id":41,"title":"Quarterly report","tags":["finance","q3"],"author":' +
+        '{"name":"A. Lovelace","email":"ada@example.com"},"published":true,"score":0.9231},' +
+        "{'id':42,'title':'Draft notes','tags':['internal',],'author':{'name':'C. Babbage'," +
+        '"email":null},"published":false,"score":0.4}],"status":"duplicated","generatedAt":' +
+        '"2026-08-25T09:14:00Z"}';
+
+      // Numbers are kept as their original text so a 19-digit id survives a round trip.
+      // JSON.parse would silently round it to the nearest double.
+      class RawNumber {
+        constructor(raw) { this.raw = raw; }
+      }
+
+      /** Trims narrative text around the first complete object or array. */
+      function extractBody(text) {
+        const start = text.search(/[{[]/);
+        if (start < 0) return { text, changed: false };
+        const open = text[start];
+        const close = open === "{" ? "}" : "]";
+        const end = text.lastIndexOf(close);
+        if (end <= start) return { text, changed: false };
+        const body = text.slice(start, end + 1);
+        return { text: body, changed: body.length !== text.trim().length };
+      }
+
+      function parseTolerant(source) {
+        let i = 0;
+        const repairs = new Set();
+        const duplicates = [];
+        const bigNumbers = [];
+        let maxDepth = 0;
+        let keyCount = 0;
+
+        const fail = (message) => {
+          const err = new Error(message);
+          err.index = i;
+          throw err;
+        };
+        const ws = () => {
+          while (i < source.length) {
+            if (/\s/.test(source[i])) { i++; continue; }
+            // Comments are not JSON, but logs and config files are full of them.
+            if (source[i] === "/" && source[i + 1] === "/") {
+              while (i < source.length && source[i] !== "\n") i++;
+              repairs.add("removed comments");
+              continue;
+            }
+            if (source[i] === "/" && source[i + 1] === "*") {
+              const end = source.indexOf("*/", i + 2);
+              i = end < 0 ? source.length : end + 2;
+              repairs.add("removed comments");
+              continue;
+            }
+            break;
+          }
+        };
+
+        function quoted(quote) {
+          i++;
+          let out = "";
+          while (i < source.length && source[i] !== quote) {
+            if (source[i] === "\\") {
+              const next = source[i + 1];
+              i += 2;
+              if (next === "n") out += "\n";
+              else if (next === "t") out += "\t";
+              else if (next === "r") out += "\r";
+              else if (next === "b") out += "\b";
+              else if (next === "f") out += "\f";
+              else if (next === "u") { out += String.fromCharCode(parseInt(source.slice(i, i + 4), 16)); i += 4; }
+              else out += next;
+            } else {
+              out += source[i++];
+            }
+          }
+          if (i >= source.length) fail("A quoted string is never closed");
+          i++;
+          if (quote === "'") repairs.add("single quotes to double");
+          return out;
+        }
+
+        function bareword() {
+          const start = i;
+          let depth = 0;
+          while (i < source.length) {
+            const c = source[i];
+            if (depth === 0 && (c === "," || c === "}" || c === "]" || c === ":")) break;
+            if (c === "{" || c === "[") depth++;
+            if (c === "}" || c === "]") depth--;
+            i++;
+          }
+          return source.slice(start, i).trim();
+        }
+
+        function numberOrLiteral(token) {
+          if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(token)) {
+            // Round-tripping through Number is the only reliable precision check.
+            if (!/[.eE]/.test(token) && String(Number(token)) !== token) bigNumbers.push(token);
+            return new RawNumber(token);
+          }
+          const lower = token.toLowerCase();
+          if (lower === "true") { if (token !== "true") repairs.add("normalised booleans"); return true; }
+          if (lower === "false") { if (token !== "false") repairs.add("normalised booleans"); return false; }
+          if (lower === "null" || token === "None" || token === "nil" || token === "undefined") {
+            if (token !== "null") repairs.add("normalised null");
+            return null;
+          }
+          return undefined;
+        }
+
+        function parseValue(depth) {
+          maxDepth = Math.max(maxDepth, depth);
+          ws();
+          if (i >= source.length) fail("The input ends before the value is given");
+          const c = source[i];
+          if (c === "{") return parseObject(depth);
+          if (c === "[") return parseArray(depth);
+          if (c === '"' || c === "'") return quoted(c);
+          const token = bareword();
+          if (!token) fail("Expected a value here");
+          const literal = numberOrLiteral(token);
+          if (literal !== undefined) return literal;
+          repairs.add("quoted bare values");
+          return token;
+        }
+
+        function parseObject(depth) {
+          i++;
+          const out = {};
+          const seen = new Set();
+          ws();
+          if (source[i] === "}") { i++; return out; }
+          for (;;) {
+            ws();
+            if (source[i] === "}") { i++; repairs.add("removed trailing commas"); return out; }
+            let key;
+            if (source[i] === '"' || source[i] === "'") key = quoted(source[i]);
+            else { key = bareword(); repairs.add("quoted bare keys"); }
+            if (!key) fail("Expected a key here");
+            ws();
+            if (source[i] !== ":") fail(`Expected ":" after the key "${key}"`);
+            i++;
+            const value = parseValue(depth + 1);
+            if (seen.has(key)) duplicates.push(key);
+            seen.add(key);
+            keyCount++;
+            out[key] = value;
+            ws();
+            if (source[i] === ",") { i++; continue; }
+            if (source[i] === "}") { i++; return out; }
+            if (i >= source.length) fail("The object is never closed");
+            fail(`Expected "," or "}" but found ${JSON.stringify(source[i])}`);
+          }
+        }
+
+        function parseArray(depth) {
+          i++;
+          const out = [];
+          ws();
+          if (source[i] === "]") { i++; return out; }
+          for (;;) {
+            ws();
+            if (source[i] === "]") { i++; repairs.add("removed trailing commas"); return out; }
+            out.push(parseValue(depth + 1));
+            ws();
+            if (source[i] === ",") { i++; continue; }
+            if (source[i] === "]") { i++; return out; }
+            if (i >= source.length) fail("The array is never closed");
+            fail(`Expected "," or "]" but found ${JSON.stringify(source[i])}`);
+          }
+        }
+
+        const value = parseValue(1);
+        ws();
+        if (i < source.length) fail("There is more text after the end of the value");
+        return { value, repairs: [...repairs], duplicates, bigNumbers, maxDepth, keyCount };
+      }
+
+      /** Own serialiser so RawNumber keeps its exact digits. */
+      function stringify(value, indent, level = 1) {
+        const pad = indent ? "\n" + indent.repeat(level) : "";
+        const padEnd = indent ? "\n" + indent.repeat(level - 1) : "";
+        if (value instanceof RawNumber) return value.raw;
+        if (value === null) return "null";
+        if (typeof value === "boolean") return String(value);
+        if (typeof value === "string") return JSON.stringify(value);
+        if (Array.isArray(value)) {
+          if (!value.length) return "[]";
+          const parts = value.map((v) => stringify(v, indent, level + 1));
+          return indent ? `[${pad}${parts.join("," + pad)}${padEnd}]` : `[${parts.join(",")}]`;
+        }
+        const keys = Object.keys(value);
+        if (!keys.length) return "{}";
+        const parts = keys.map((k) => `${JSON.stringify(k)}:${indent ? " " : ""}${stringify(value[k], indent, level + 1)}`);
+        return indent ? `{${pad}${parts.join("," + pad)}${padEnd}}` : `{${parts.join(",")}}`;
+      }
+
+      // Highlighting builds one HTML string rather than a node per token, and is skipped
+      // entirely on very large documents so the tab never locks up.
+      const HIGHLIGHT_LIMIT = 300000;
+      function highlight(text) {
+        const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return escaped.replace(
+          /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+          (match, str, colon, lit, num) => {
+            if (str) return `<span class="${colon ? "t-key" : "t-str"}">${str}</span>${colon || ""}`;
+            if (lit) return `<span class="t-lit">${lit}</span>`;
+            return `<span class="t-num">${num}</span>`;
+          },
+        );
+      }
+
+      let lastOutput = "";
+
+      function run(minify) {
+        const raw = els.input.value;
+        if (!raw.trim()) return;
+
+        const notes = [];
+        let working = raw;
+
+        // Unwrap before trimming: a document that is entirely one JSON string has its
+        // braces *inside* the quotes, so trimming first would eat the quotes and leave
+        // the escapes behind as literal characters.
+        // Peel every layer, then keep the result only if it actually reached an object or
+        // array. A document that is legitimately just a string must come back untouched.
+        let unwrappedTimes = 0;
+        let peeled = working;
+        let depthPeeled = 0;
+        for (let pass = 0; pass < 5; pass++) {
+          const candidate = peeled.trim();
+          if (!/^"[\s\S]*"$/.test(candidate)) break;
+          let inner;
+          try {
+            inner = JSON.parse(candidate);
+          } catch {
+            break;
+          }
+          if (typeof inner !== "string") break;
+          peeled = inner;
+          depthPeeled++;
+          if (/^\s*[{[]/.test(inner)) {
+            working = inner;
+            unwrappedTimes = depthPeeled;
+          }
+        }
+        if (unwrappedTimes) {
+          notes.push({
+            level: "info",
+            headline: unwrappedTimes === 1 ? "Unwrapped double-encoded JSON" : `Unwrapped ${unwrappedTimes} layers of encoding`,
+            detail: "the document was a JSON string containing more JSON.",
+          });
+        }
+
+        const body = extractBody(working);
+        working = body.text;
+        if (body.changed) notes.push({ level: "info", headline: "Trimmed surrounding text", detail: "only the object or array itself was parsed." });
+
+        let parsed;
+        try {
+          parsed = parseTolerant(working);
+        } catch (err) {
+          const upto = working.slice(0, err.index || 0);
+          const line = upto.split("\n").length;
+          const column = upto.length - upto.lastIndexOf("\n");
+          els.output.textContent = "";
+          els.results.hidden = true;
+          els.status.textContent = `Line ${line}, column ${column}: ${err.message}`;
+          return;
+        }
+
+        const { value, repairs, duplicates, bigNumbers, maxDepth, keyCount } = parsed;
+        const text = stringify(value, minify ? "" : "  ");
+        lastOutput = text;
+
+        if (text.length > HIGHLIGHT_LIMIT) els.output.textContent = text;
+        else els.output.innerHTML = highlight(text);
+
+        if (repairs.length) {
+          notes.push({ level: "warn", headline: "This was not valid JSON", detail: `repaired by: ${repairs.join(", ")}. Check the result against what you expected.` });
+        }
+        if (duplicates.length) {
+          const unique = [...new Set(duplicates)];
+          notes.push({ level: "warn", headline: `Duplicate key${unique.length === 1 ? "" : "s"}: ${unique.join(", ")}`, detail: "only the last value survives. Every JSON parser does this silently, which is how data goes missing unnoticed." });
+        }
+        if (bigNumbers.length) {
+          notes.push({ level: "warn", headline: "Number too large to be exact", detail: `${bigNumbers[0]} exceeds what JavaScript can represent. The digits are preserved here, but any tool that parses this normally will change them.` });
+        }
+        if (!notes.length) {
+          notes.push({ level: "good", headline: "Valid JSON", detail: "parsed exactly as given, nothing was changed." });
+        }
+        renderFindings(els.findings, notes);
+
+        els.stats.replaceChildren();
+        row(els.stats, "Input", `${raw.length.toLocaleString()} characters`, true);
+        row(els.stats, "Formatted", `${text.length.toLocaleString()} characters`, true);
+        row(els.stats, "Keys", keyCount.toLocaleString(), true);
+        row(els.stats, "Nesting depth", String(maxDepth), true);
+        row(els.stats, "Top level", Array.isArray(value) ? `array of ${value.length}` : typeof value === "object" && value ? "object" : typeof value);
+
+        els.results.hidden = false;
+        els.status.textContent = `${minify ? "Minified" : "Formatted"} in this page. Nothing was uploaded.`;
+      }
+
+      function invalidate() {
+        if (els.results.hidden && !els.output.textContent) return;
+        els.output.textContent = "";
+        els.results.hidden = true;
+        lastOutput = "";
+        els.status.textContent = "Press Format to read this.";
+      }
+
+      const sync = bindSubmitEnabled(els.input, els.go, invalidate);
+      const syncSecondary = () => {
+        els.minify.disabled = !els.input.value.trim();
+        els.copy.disabled = !lastOutput;
+      };
+      els.input.addEventListener("input", syncSecondary);
+
+      els.go.addEventListener("click", () => { run(false); syncSecondary(); });
+      els.minify.addEventListener("click", () => { run(true); syncSecondary(); });
+      els.sample.addEventListener("click", () => {
+        els.input.value = SAMPLE;
+        els.input.dispatchEvent(new Event("input"));
+        run(false);
+        syncSecondary();
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.output.textContent = "";
+        els.results.hidden = true;
+        lastOutput = "";
+        els.status.textContent = "Nothing is uploaded. The parsing happens in this page.";
+        els.input.focus();
+        syncSecondary();
+      });
+      els.copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(lastOutput);
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
+      });
+
+      sync();
+      syncSecondary();
+    </script>
+  </body>
+</html>
