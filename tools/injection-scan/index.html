@@ -62,7 +62,7 @@
     </main>
 
     <script type="module">
-      import { row, renderVerdict, renderFindings } from "../../assets/toolshed.js";
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
       import { scanText } from "../../assets/scan.js";
 
       const els = {
@@ -259,6 +259,7 @@
         els.status.textContent = `Scanned ${[...raw].length} characters in this page. Nothing was uploaded.`;
       }
 
+      bindSubmitEnabled(els.input, els.scan);
       els.scan.addEventListener("click", run);
       els.input.addEventListener("input", run);
       els.sample.addEventListener("click", () => { els.input.value = SAMPLE; run(); });

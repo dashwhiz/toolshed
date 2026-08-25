@@ -153,6 +153,19 @@ input[type="text"] {
 input[type="text"]::placeholder { color: var(--muted); }
 input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* Safari and iOS paint autofilled fields a fixed pale yellow that background-color
+   cannot override. The inset shadow is the only way to hold the one background. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--fg);
+  -webkit-box-shadow: 0 0 0 100px var(--bg) inset;
+  box-shadow: 0 0 0 100px var(--bg) inset;
+  caret-color: var(--fg);
+}
+
 button {
   padding: 0.8rem 1.4rem;
   background: var(--accent);

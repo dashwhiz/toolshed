@@ -54,7 +54,7 @@
     </main>
 
     <script type="module">
-      import { row, renderVerdict, renderFindings } from "../../assets/toolshed.js";
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
       import { parseHost, dns } from "../../assets/domain.js";
 
       // DNS gives no way to enumerate selectors, so probe the ones the big providers use.
@@ -204,6 +204,8 @@
         }
       }
 
+      const syncEnabled = bindSubmitEnabled(els.input, els.go);
+
       els.form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const raw = els.input.value.includes("@") ? els.input.value.split("@").pop() : els.input.value;
@@ -221,7 +223,7 @@
         } catch (err) {
           els.status.textContent = "Could not complete the check — " + err.message;
         } finally {
-          els.go.disabled = false;
+          syncEnabled();
         }
       });
     </script>

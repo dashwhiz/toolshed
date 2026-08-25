@@ -53,5 +53,18 @@ injection scanner said "a alt attribute".
 Mobile verified at 360 and 390px across all six pages: nothing scrolls sideways, buttons take
 the full row once they wrap, card and data grids collapse to one column.
 
-Next: `link`, then `jwt`, then `ip`.
+## 2026-08-25
+Fixed two things reported from an iPhone. Submit buttons were live on an empty field, so
+pressing Check on a blank form returned "That does not look like a domain" — which then sat
+there looking like a rejection of whatever was typed next. They are now disabled until the
+field has non-whitespace content, via `bindSubmitEnabled` in `assets/toolshed.js`. The
+in-flight path calls the returned sync function instead of blindly re-enabling.
+
+Also killed the pale yellow iOS autofill background. `background-color` cannot override it;
+an inset `-webkit-box-shadow` can, so the single-background rule survives.
+
+Confirmed the reported input was never broken: `admin@unicorn.com` parses to `unicorn.com`
+and checks fine. The stale error message was the empty-click bug.
+
+Both rules are now in DESIGN.md. Next: `link`, then `jwt`, then `ip`.
 

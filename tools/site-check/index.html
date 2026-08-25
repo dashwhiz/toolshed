@@ -62,7 +62,7 @@
     </main>
 
     <script type="module">
-      import { row, renderVerdict, renderFindings, countBy } from "../../assets/toolshed.js";
+      import { row, renderVerdict, renderFindings, countBy, bindSubmitEnabled } from "../../assets/toolshed.js";
       import {
         parseHost, toUnicode, dns, rdap, eventDate, registrarName,
         describeAge, fmtDate, DAY,
@@ -224,6 +224,8 @@
         }
       }
 
+      const syncEnabled = bindSubmitEnabled(els.input, els.go);
+
       els.form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const host = parseHost(els.input.value);
@@ -240,7 +242,7 @@
         } catch (err) {
           els.status.textContent = "Could not complete the check — " + err.message;
         } finally {
-          els.go.disabled = false;
+          syncEnabled();
         }
       });
     </script>

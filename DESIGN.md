@@ -70,6 +70,18 @@ p.note#status      live state — what was checked, what failed
 div.caveats        what this tool cannot tell you. Required on anything that judges.
 ```
 
+## Controls
+
+A submit button stays disabled while its field is empty — wire it with `bindSubmitEnabled`
+from `assets/toolshed.js`, and call the sync function it returns when an in-flight request
+finishes rather than setting `disabled = false`. Whitespace counts as empty. Pressing a
+button and being told off for leaving the field blank is a worse experience than the button
+plainly not being available.
+
+Safari and iOS paint autofilled fields a fixed pale yellow that `background-color` cannot
+override. The `-webkit-autofill` block in the stylesheet holds the single background with an
+inset shadow. Do not add a field style that reintroduces it.
+
 ## Honesty
 
 Any tool that renders a judgement states its limits on the page, in `.caveats`, in plain
