@@ -97,21 +97,53 @@
         const txt = settled[4].status === "fulfilled" ? settled[4].value.records : [];
         const caa = settled[5].status === "fulfilled" ? settled[5].value.records : [];
 
+        // A rejected lookup is not an empty record set. Reporting "no mail servers" or
+        // "no CAA record" after a resolver failure states as fact something never learned.
+        const failed = settled.filter((r) => r.status === "rejected").length;
+        if (failed) {
+          findings.push({ level: "warn", headline: "Some lookups did not complete", detail: `${failed} of ${settled.length} queries failed, so anything reported as absent below may simply be unknown.` });
+        }
+
         if (a?.nxdomain) {
           findings.push({ level: "bad", headline: "Domain does not exist", detail: "the resolver returned NXDOMAIN." });
         }
         if (!ns.length) {
           findings.push({ level: "warn", headline: "No nameservers returned", detail: "unusual for a delegated domain — this may be a subdomain rather than a zone." });
         }
-        if (!mx.length) {
-          findings.push({ level: "info", headline: "No mail servers", detail: "this name cannot receive email." });
+        // RFC 7505: a single "." target is an explicit statement that the domain
+        // accepts no mail, which is the opposite of an absent record.
+        const nullMx = mx.length === 1 && /^\s*0\s+\.?\s*$/.test(mx[0].replace(/\.$/, " ."));
+        if (nullMx) {
+          findings.push({ level: "info", headline: "Explicitly accepts no mail", detail: "a null MX record (0 .) — the domain states that it receives no email at all." });
+        } else if (!mx.length && settled[2].status === "fulfilled") {
+          findings.push({ level: "info", headline: "No mail servers", detail: "no MX record, so this name cannot receive email." });
         }
         const spf = txt.find((t) => t.replace(/"/g, "").toLowerCase().startsWith("v=spf1"));
         if (txt.length && !spf) {
           findings.push({ level: "info", headline: "Text records but no SPF", detail: "nothing declares which servers may send mail as this domain." });
         }
-        if (!caa.length) {
-          findings.push({ level: "info", headline: "No CAA record", detail: "any certificate authority may issue certificates for this domain." });
+        /*
+         * RFC 8659 §3: a certificate authority that finds no CAA record climbs to the
+         * parent. Reporting "any CA may issue" for www.google.com was false — google.com
+         * publishes `0 issue "pki.goog"`, and that governs the subdomain too.
+         */
+        if (!caa.length && settled[5].status === "fulfilled") {
+          const labels = host.split(".");
+          let inherited = null;
+          for (let i = 1; !inherited && i < labels.length - 1; i++) {
+            const parent = labels.slice(i).join(".");
+            try {
+              const res = await dns(parent, "CAA");
+              if (res.records.length) inherited = { parent, records: res.records };
+            } catch {
+              break;
+            }
+          }
+          if (inherited) {
+            findings.push({ level: "info", headline: `Certificate policy inherited from ${inherited.parent}`, detail: `this name has no CAA record of its own, so authorities apply the one on ${inherited.parent}: ${inherited.records.join(", ")}.` });
+          } else {
+            findings.push({ level: "info", headline: "No CAA record", detail: "neither this name nor any parent restricts which certificate authority may issue for it." });
+          }
         }
         renderFindings(els.findings, findings);
         return found;

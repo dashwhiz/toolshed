@@ -108,12 +108,21 @@
       const HIDING_STYLES = [
         [/display\s*:\s*none/i, "display:none"],
         [/visibility\s*:\s*hidden/i, "visibility:hidden"],
-        [/opacity\s*:\s*0(?!\.)/i, "opacity:0"],
+        [/opacity\s*:\s*0*(?:\.0+)?\s*(?:;|$|!)/i, "opacity:0"],
         [/font-size\s*:\s*0/i, "font-size:0"],
         [/(text-indent|left|top)\s*:\s*-\d{3,}/i, "positioned off-screen"],
         [/clip\s*:\s*rect\(0/i, "clipped to nothing"],
         [/height\s*:\s*0.*overflow\s*:\s*hidden/i, "collapsed to zero height"],
       ];
+
+      // Text the same colour as its background is invisible without any of the above.
+      function sameColourAsBackground(style) {
+        const colour = /(?:^|;)\s*color\s*:\s*([^;]+)/i.exec(style);
+        const background = /background(?:-color)?\s*:\s*([^;]+)/i.exec(style);
+        if (!colour || !background) return null;
+        const norm = (v) => v.trim().toLowerCase().replace(/\s+/g, "");
+        return norm(colour[1]) === norm(background[1]) ? `text is ${colour[1].trim()} on the same colour` : null;
+      }
 
       const trim = (t, n = 120) => {
         const flat = t.replace(/\s+/g, " ").trim();
@@ -148,16 +157,62 @@
             if (value) comments.push(value);
           }
           for (const c of comments) {
-            findings.push({ level: "warn", headline: "HTML comment", detail: `“${trim(c)}”` });
+            // Ordinary source is full of comments. Only ones that read as instructions
+            // are worth a warning; the rest are noted so the count is still visible.
+            const instructionLike = INSTRUCTION_PATTERNS.some(([re]) => { re.lastIndex = 0; return re.test(c); });
+            findings.push({
+              level: instructionLike ? "warn" : "info",
+              headline: instructionLike ? "Instruction-shaped text in an HTML comment" : "HTML comment",
+              detail: `“${trim(c)}”`,
+            });
+          }
+
+          // A page hides things with a stylesheet far more often than with an inline
+          // style attribute, and `hidden` needs no CSS at all. Missing both meant the
+          // three most ordinary ways to conceal text returned "nothing concealed".
+          for (const el of doc.querySelectorAll("[hidden]")) {
+            const text = (el.textContent || "").trim();
+            if (text) {
+              findings.push({ level: "bad", headline: "Hidden with the hidden attribute", detail: `“${trim(text)}”` });
+            }
+          }
+
+          const rules = [...doc.querySelectorAll("style")]
+            .map((el) => el.textContent || "")
+            .join("\n");
+          if (rules) {
+            const blockRe = /([^{}]+)\{([^}]*)\}/g;
+            let block;
+            while ((block = blockRe.exec(rules))) {
+              const selector = block[1].trim();
+              const body = block[2];
+              const why =
+                (HIDING_STYLES.find(([re]) => re.test(body)) || [])[1] || sameColourAsBackground(body);
+              if (!why || !selector) continue;
+              let matched = [];
+              try { matched = [...doc.querySelectorAll(selector)]; } catch { continue; }
+              for (const el of matched) {
+                const text = (el.textContent || "").trim();
+                if (!text) continue;
+                findings.push({
+                  level: "bad",
+                  headline: `Hidden by a stylesheet rule (${why})`,
+                  detail: `${selector} — “${trim(text)}”`,
+                });
+              }
+            }
           }
 
           for (const attr of ["alt", "title", "aria-label", "placeholder"]) {
             for (const el of doc.body.querySelectorAll(`[${attr}]`)) {
               const value = (el.getAttribute(attr) || "").trim();
-              // Short labels are just labels. Sentences in an alt attribute are not.
-              if (value.split(/\s+/).length >= 5) {
+              // A described image is good accessibility practice; only wording that
+              // addresses a reader as an instruction is worth surfacing, and even then
+              // as a weak signal rather than evidence of hiding.
+              const instructionLike = INSTRUCTION_PATTERNS.some(([re]) => { re.lastIndex = 0; return re.test(value); });
+              if (value.split(/\s+/).length >= 5 && instructionLike) {
                 findings.push({
-                  level: "warn",
+                  level: "info",
                   headline: `Sentence hidden in ${/^[aeiou]/.test(attr) ? "an" : "a"} ${attr} attribute`,
                   detail: `on <${el.tagName.toLowerCase()}>: “${trim(value)}”`,
                 });

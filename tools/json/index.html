@@ -146,7 +146,14 @@
               else if (next === "r") out += "\r";
               else if (next === "b") out += "\b";
               else if (next === "f") out += "\f";
-              else if (next === "u") { out += String.fromCharCode(parseInt(source.slice(i, i + 4), 16)); i += 4; }
+              else if (next === "u") {
+                const hex = source.slice(i, i + 4);
+                // parseInt("ZZZZ", 16) is NaN, and fromCharCode(NaN) is a NUL byte —
+                // a malformed escape used to become an invisible character silently.
+                if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail("Invalid \\u escape: \\u" + hex);
+                out += String.fromCharCode(parseInt(hex, 16));
+                i += 4;
+              }
               else out += next;
             } else {
               out += source[i++];
@@ -172,9 +179,11 @@
         }
 
         function numberOrLiteral(token) {
-          if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(token)) {
+          if (/^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/.test(token)) {
             // Round-tripping through Number is the only reliable precision check.
-            if (!/[.eE]/.test(token) && String(Number(token)) !== token) bigNumbers.push(token);
+            // -0 survives the round trip as "0", which is a formatting quirk rather than
+            // a loss of precision, so it must not be reported as one.
+            if (!/[.eE]/.test(token) && token !== "-0" && String(Number(token)) !== token) bigNumbers.push(token);
             return new RawNumber(token);
           }
           const lower = token.toLowerCase();
@@ -205,7 +214,8 @@
 
         function parseObject(depth) {
           i++;
-          const out = {};
+          // Prototype-less, so "__proto__" is an ordinary key rather than a setter.
+          const out = Object.create(null);
           const seen = new Set();
           ws();
           if (source[i] === "}") { i++; return out; }
@@ -223,7 +233,10 @@
             if (seen.has(key)) duplicates.push(key);
             seen.add(key);
             keyCount++;
-            out[key] = value;
+            // A plain object literal treats "__proto__" as the prototype setter, so the
+            // key was swallowed and Object.keys never saw it — the tool dropped a key
+            // while reporting that nothing had changed.
+            Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
             ws();
             if (source[i] === ",") { i++; continue; }
             if (source[i] === "}") { i++; return out; }
