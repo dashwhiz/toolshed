@@ -179,3 +179,42 @@ Portfolio untouched: its single Toolshed entry already covers this, and the blur
 change because a token decoder joined the collection. Marked `on-portfolio` directly.
 
 Next: `encode`, then `timestamp`, then `ids`.
+
+Ran an adversarial review on `jwt` and fixed all twelve Critical and Important findings.
+This is now a standing step, recorded in the rules: every tool gets a reviewer subagent told
+to break it, before it counts as done.
+
+The Critical one was iconography, not wording. Every string on the page was careful about
+decode-versus-verify, but a token inside its dates still rendered an accent-green tick — and
+on a tampered token, that tick is the one thing a hurried reader takes away. No branch on
+that page is `good` any more; the in-window case is `info` and leads with "signature
+unchecked". `good` is a claim, not a colour, and that is now in DESIGN.md.
+
+The rest were wrong output rather than style. The Payload pane printed numbers the token did
+not contain, because it was built from the `JSON.parse`d object rather than the raw text —
+so a 20-digit `jti` came out rounded, in a repo whose sibling tool advertises preserving
+exactly that. Four uncaught `TypeError`s made Decode do nothing at all, silently. A string
+`exp` produced "no expiry" on a token that plainly had one. Millisecond timestamps printed
+the year 58621 as fact. The 30-day lifetime warning never fired without an `iat`. A token
+copied from a wrapped terminal was rejected outright, because padding was computed before
+whitespace was stripped. A long header key scrolled the page sideways at 360px. Claims like
+`roles` were never tabulated at all.
+
+Hoisted the tolerant reader to `assets/json-parse.js`, which is what lets the decoder report
+duplicate claims and exact numbers. Duplicate claims matter here specifically: parsers
+disagree about which wins, so two servers can read one token differently.
+
+That hoist also broke the JSON formatter — `extractBody` sat inside the slice I moved and
+stopped being defined, so Format threw on every press. My own regression check had passed
+because I ran it before the hoist rather than after. Caught it in the console during the
+verification sweep; both tools re-exercised end to end afterwards.
+
+Bounded anything built from attacker-controlled input: `.output` scrolls, and the claim and
+header tables cap at 100 rows and say how many were left out. An 8,000-claim token made the
+page 419,751px tall and put the caveats past any reasonable reach — the same class of bug as
+the JSON panes on 2026-08-25, in a new place.
+
+DESIGN.md now describes the footer that actually exists — one paragraph, no links row, with
+the sentence chosen by `data-sends`. The blanket privacy claim it replaced was false on the
+tools that do reach the network.
+
