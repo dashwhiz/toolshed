@@ -1,7 +1,9 @@
 # Toolshed
 
 Small tools for questions that keep coming up — is this website real, where does a link in
-an email actually go, what is hidden in this text. Built in batches as the questions came up.
+an email actually go, what is hidden in this text — plus the everyday ones you would
+otherwise hunt for a site to do, like formatting JSON or decoding a token. Built in
+batches as the questions came up.
 
 Each one is a single static page — no build step, no backend, no API keys, no accounts.
 
