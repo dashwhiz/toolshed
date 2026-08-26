@@ -140,8 +140,8 @@ export function bindSubmitEnabled(field, button, onEdit) {
  * plain text above `limit` so a huge payload stays responsive.
  */
 export function highlightJson(text, limit = 300000) {
-  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   if (text.length > limit) return { html: null, text };
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const html = escaped.replace(
     /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
     (match, str, colon, lit, num) => {

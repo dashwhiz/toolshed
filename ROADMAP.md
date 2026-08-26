@@ -122,6 +122,11 @@ not by how interesting the tool is:
 
 ## Rules
 
+- Every tool gets an adversarial review before it is done. Dispatch a reviewer subagent over
+  the commit range and tell it to break the tool every way it can — XSS wherever
+  attacker-controlled text reaches `innerHTML`, prototype pollution, type confusion in parsed
+  input, wrong output, crashes, and any wording claiming more certainty than the tool has.
+  Make it reproduce each bug with the exact input. Fix every Critical and Important finding.
 - One commit per meaningful increment. Never pad, never split a change to raise the count, never commit empty.
 - Verify a tool works in the browser before marking it `shipped`.
 - Follow [`DESIGN.md`](DESIGN.md). No emoji, no in-page nav, one background colour.

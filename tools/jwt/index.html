@@ -63,6 +63,7 @@
 
     <script type="module">
       import { row, renderVerdict, renderFindings, bindSubmitEnabled, renderJson } from "../../assets/toolshed.js";
+      import { parseTolerant, stringify } from "../../assets/json-parse.js";
 
       const els = {
         input: document.getElementById("input"),
@@ -78,20 +79,22 @@
         clear: document.getElementById("clear"),
       };
 
-      // Signed with the well-known "your-256-bit-secret" example key, so it is not a
-      // credential for anything. Expiry is in the past on purpose.
+      // Not signed with anything — the third segment is the ASCII placeholder
+      // "KyPoCtenSignatureNotVerifiedHere". Nothing here verifies it, which is the point.
       const SAMPLE =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleS0yMDI0LTA5In0." +
         "eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyXzQ4MjEiLCJhdWQiOiJodHRwczovL2FwaS5leGFtcGxlLmNvbSIsImlhdCI6MTcyNTAwMDAwMCwiZXhwIjoxNzI1MDAzNjAwLCJlbWFpbCI6ImFkYUBleGFtcGxlLmNvbSIsInJvbGVzIjpbImFkbWluIiwiZWRpdG9yIl19." +
         "S3lQb0N0ZW5TaWduYXR1cmVOb3RWZXJpZmllZEhlcmU";
 
+      // Labels say "says", because nothing here establishes that any of it is true.
       const CLAIM_NAMES = {
-        iss: "who issued it",
-        sub: "who it is about",
-        aud: "who should accept it",
-        exp: "expires",
-        nbf: "not valid before",
-        iat: "issued at",
+        __proto__: null,
+        iss: "who it says issued it",
+        sub: "who it says it is about",
+        aud: "who it says should accept it",
+        exp: "says it expires",
+        nbf: "says it is not valid before",
+        iat: "says it was issued at",
         jti: "token id",
         azp: "authorised party",
         scope: "scope",
@@ -99,19 +102,48 @@
       };
 
       const HEADER_NAMES = {
-        alg: "Signing algorithm",
-        typ: "Type",
-        kid: "Key id",
-        cty: "Content type",
-        enc: "Encryption",
+        __proto__: null,
+        alg: "signing algorithm",
+        typ: "type",
+        kid: "key id",
+        cty: "content type",
+        enc: "encryption",
       };
 
-      // Claims whose presence means the token is carrying personal data around.
       const PERSONAL = ["email", "name", "given_name", "family_name", "phone_number",
         "preferred_username", "picture", "address", "birthdate"];
 
+      const KNOWN_CLAIMS = ["iss", "sub", "aud", "jti", "azp", "scope", "scp"];
+      const TIME_CLAIMS = ["iat", "nbf", "exp"];
+
+      // A NumericDate is in seconds. Anything past this is milliseconds by mistake —
+      // rendering it as a date would print the year 58621 as though it were fact.
+      const MAX_PLAUSIBLE_SECONDS = 1e11;
+
+      // A row per claim is unreadable past a point, and an unbounded table pushes the
+      // caveats tens of thousands of pixels down the page. The Payload block below still
+      // holds every claim, so nothing is lost by stopping here.
+      const MAX_ROWS = 100;
+
+      /** Never throws, whatever shape the claim turned out to be. */
+      function asText(value) {
+        // A number kept as text by the tolerant reader: print the digits as written.
+        if (value && typeof value === "object" && typeof value.raw === "string") return value.raw;
+        if (value === null || typeof value !== "object") return String(value);
+        if (Array.isArray(value) && value.every((v) => v === null || typeof v !== "object")) {
+          return value.join(", ");
+        }
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return "[a value this page cannot display]";
+        }
+      }
+
       function b64urlDecode(part) {
-        const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+        // Strip whitespace first: a token copied from a wrapped terminal or an email
+        // carries newlines, and padding computed before stripping them is wrong.
+        const b64 = part.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
         const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
         let binary;
         try {
@@ -123,14 +155,18 @@
         return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
       }
 
-      const fmtTime = (seconds) =>
-        new Date(seconds * 1000).toLocaleString(undefined, {
+      function fmtTime(seconds) {
+        const date = new Date(seconds * 1000);
+        if (Number.isNaN(date.getTime())) return "a date outside the range this page can show";
+        return date.toLocaleString(undefined, {
           year: "numeric", month: "short", day: "numeric",
           hour: "2-digit", minute: "2-digit",
         });
+      }
 
       function describeGap(ms) {
         const abs = Math.abs(ms);
+        if (!Number.isFinite(abs)) return "an unreadable amount of time";
         const minutes = Math.round(abs / 60000);
         if (minutes < 1) return "less than a minute";
         if (minutes < 90) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
@@ -140,6 +176,19 @@
         if (days < 60) return `${days} day${days === 1 ? "" : "s"}`;
         const months = Math.round(days / 30);
         return months < 24 ? `${months} months` : `${(days / 365).toFixed(1)} years`;
+      }
+
+      /** Distinguishes absent from present-but-unusable, which mean opposite things. */
+      function readTimeClaim(payload, key) {
+        if (!Object.hasOwn(payload, key)) return { state: "absent" };
+        const value = payload[key];
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return { state: "wrong-type", raw: value };
+        }
+        if (Math.abs(value) > MAX_PLAUSIBLE_SECONDS) {
+          return { state: "milliseconds", seconds: value / 1000, raw: value };
+        }
+        return { state: "ok", seconds: value };
       }
 
       function decode(raw) {
@@ -153,50 +202,58 @@
           throw new Error(`A JWT has three sections separated by dots. This has ${parts.length}.`);
         }
 
-        let header, payload;
+        let headerText, payloadText, header, payload;
         try {
-          header = JSON.parse(b64urlDecode(parts[0]));
+          headerText = b64urlDecode(parts[0]);
+          header = JSON.parse(headerText);
         } catch (err) {
           throw new Error(`The header could not be read — ${err.message}`);
         }
+        if (typeof header !== "object" || header === null || Array.isArray(header)) {
+          throw new Error("The header decoded, but it is not a JSON object.");
+        }
         try {
-          payload = JSON.parse(b64urlDecode(parts[1]));
+          payloadText = b64urlDecode(parts[1]);
+          payload = JSON.parse(payloadText);
         } catch (err) {
           throw new Error(`The payload could not be read — ${err.message}`);
         }
         if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
           throw new Error("The payload decoded, but it is not a JSON object.");
         }
-        return { header, payload, signature: parts[2], token };
+        return { header, payload, payloadText, signature: parts[2] };
       }
 
-      function run() {
-        const raw = els.input.value;
-        if (!raw.trim()) return;
-
-        let decoded;
-        try {
-          decoded = decode(raw);
-        } catch (err) {
-          els.results.hidden = true;
-          els.status.textContent = err.message;
-          return;
-        }
-
-        const { header, payload, signature } = decoded;
+      function render(decoded) {
+        const { header, payload, payloadText, signature } = decoded;
         const findings = [];
         const now = Date.now();
 
-        // Header
+        // Read the raw text once. JSON.parse has already rounded long numbers and thrown
+        // duplicate keys away, so every claim shown to a reader comes from this instead.
+        let exact = null;
+        try {
+          exact = parseTolerant(payloadText);
+        } catch {
+          exact = null;
+        }
+        const display = exact && exact.value && typeof exact.value === "object" ? exact.value : payload;
+
         els.header.replaceChildren();
-        for (const [key, value] of Object.entries(header)) {
-          const label = HEADER_NAMES[key] ? `${key} — ${HEADER_NAMES[key]}` : key;
-          row(els.header, label, typeof value === "string" ? value : JSON.stringify(value), true);
+        const headerKeys = Object.keys(header);
+        for (const key of headerKeys.slice(0, MAX_ROWS)) {
+          const name = Object.hasOwn(HEADER_NAMES, key) ? HEADER_NAMES[key] : null;
+          row(els.header, name ? `${key} — ${name}` : key, asText(header[key]), true);
+        }
+        if (headerKeys.length > MAX_ROWS) {
+          row(els.header, "and more", `${headerKeys.length - MAX_ROWS} further header fields, not listed`);
         }
 
-        const alg = String(header.alg || "");
-        if (!alg) {
+        const alg = typeof header.alg === "string" ? header.alg : "";
+        if (!Object.hasOwn(header, "alg")) {
           findings.push({ level: "warn", headline: "No algorithm named", detail: "the header does not say how this was signed." });
+        } else if (!alg) {
+          findings.push({ level: "warn", headline: "The algorithm is not a string", detail: `alg is ${asText(header.alg)}, which no verifier will understand.` });
         } else if (alg.toLowerCase() === "none") {
           findings.push({
             level: "bad",
@@ -210,38 +267,74 @@
 
         // Claims
         els.claims.replaceChildren();
-        const timeClaims = ["iat", "nbf", "exp"];
-        for (const key of ["iss", "sub", "aud", "jti", "azp", "scope", "scp"]) {
-          if (payload[key] === undefined) continue;
-          const value = Array.isArray(payload[key]) ? payload[key].join(", ") : String(payload[key]);
-          row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, value, true);
+        const shown = new Set();
+        for (const key of KNOWN_CLAIMS) {
+          if (!Object.hasOwn(payload, key)) continue;
+          row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, asText(display[key] ?? payload[key]), true);
+          shown.add(key);
         }
-        for (const key of timeClaims) {
-          const value = payload[key];
-          if (typeof value !== "number") continue;
-          const at = value * 1000;
-          const gap = at - now;
+
+        const times = {};
+        for (const key of TIME_CLAIMS) {
+          const claim = readTimeClaim(payload, key);
+          times[key] = claim;
+          if (claim.state === "absent") continue;
+          shown.add(key);
+          if (claim.state === "wrong-type") {
+            row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, `${asText(claim.raw)} (not a number)`, true);
+            findings.push({
+              level: "warn",
+              headline: `${key} is not a number`,
+              detail: `it is ${asText(claim.raw)}. A NumericDate must be a number of seconds, and servers disagree about what to do with anything else — do not read this token as having no ${key}.`,
+            });
+            continue;
+          }
+          const gap = claim.seconds * 1000 - now;
           const when = gap > 0 ? `in ${describeGap(gap)}` : `${describeGap(gap)} ago`;
-          row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, `${fmtTime(value)} (${when})`);
+          const note = claim.state === "milliseconds" ? " — read as milliseconds" : "";
+          row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, `${fmtTime(claim.seconds)} (${when})${note}`);
         }
 
-        const exp = typeof payload.exp === "number" ? payload.exp * 1000 : null;
-        const nbf = typeof payload.nbf === "number" ? payload.nbf * 1000 : null;
-        const iat = typeof payload.iat === "number" ? payload.iat * 1000 : null;
+        const msClaims = TIME_CLAIMS.filter((k) => times[k].state === "milliseconds");
+        if (msClaims.length) {
+          findings.push({
+            level: "warn",
+            headline: `${msClaims.join(", ")} looks like milliseconds, not seconds`,
+            detail: "a NumericDate counts seconds. Read literally these dates land tens of thousands of years out, so they have been divided by a thousand here — but the token as written is wrong, and a verifier will not do that.",
+          });
+        }
 
-        if (exp === null) {
+        // Everything else the token carries. Whitelisting alone hid roles and scopes.
+        const others = Object.keys(payload).filter((k) => !shown.has(k));
+        for (const key of others.slice(0, MAX_ROWS)) {
+          row(els.claims, key, asText(display[key] ?? payload[key]), true);
+        }
+        if (others.length > MAX_ROWS) {
+          row(els.claims, "and more", `${others.length - MAX_ROWS} further claims, listed in full under Payload below`);
+        }
+
+        const exp = times.exp.state === "absent" || times.exp.state === "wrong-type" ? null : times.exp.seconds * 1000;
+        const nbf = times.nbf.state === "absent" || times.nbf.state === "wrong-type" ? null : times.nbf.seconds * 1000;
+        const iat = times.iat.state === "absent" || times.iat.state === "wrong-type" ? null : times.iat.seconds * 1000;
+
+        if (times.exp.state === "absent") {
           findings.push({ level: "warn", headline: "No expiry", detail: "the token has no exp claim, so on its own it never stops being accepted." });
-        } else if (exp < now) {
-          findings.push({ level: "warn", headline: `Expired ${describeGap(exp - now)} ago`, detail: `it stopped being usable at ${fmtTime(payload.exp)}.` });
+        } else if (exp !== null && exp < now) {
+          findings.push({ level: "warn", headline: `Expired ${describeGap(exp - now)} ago`, detail: `it stopped being usable at ${fmtTime(times.exp.seconds)}.` });
         }
         if (nbf !== null && nbf > now) {
           findings.push({ level: "warn", headline: `Not usable for another ${describeGap(nbf - now)}`, detail: "the nbf claim puts the start of its window in the future." });
         }
-        if (exp !== null && iat !== null && exp - iat > 30 * 86400000) {
-          findings.push({ level: "warn", headline: `Lifetime of ${describeGap(exp - iat)}`, detail: "a long-lived token is a long-lived problem if it leaks." });
+        if (iat !== null && iat > now) {
+          findings.push({ level: "warn", headline: "Issued in the future", detail: `the iat claim is ${describeGap(iat - now)} ahead of this device's clock.` });
+        }
+        // Fall back when iat is missing, or a long-lived token without one goes unflagged.
+        const issued = iat ?? nbf ?? now;
+        if (exp !== null && exp - issued > 30 * 86400000) {
+          findings.push({ level: "warn", headline: `Lifetime of ${describeGap(exp - issued)}`, detail: "a long-lived token is a long-lived problem if it leaks." });
         }
 
-        const personal = PERSONAL.filter((k) => payload[k] !== undefined);
+        const personal = PERSONAL.filter((k) => Object.hasOwn(payload, k));
         if (personal.length) {
           findings.push({
             level: "info",
@@ -250,17 +343,42 @@
           });
         }
 
+        // Reparse the raw text: JSON.parse already threw away duplicate keys and rounded
+        // long numbers, so the pane must not be built from the parsed object.
+        let payloadOut;
+        try {
+          const reparsed = exact;
+          if (!reparsed) throw new Error("unparsed");
+          payloadOut = stringify(reparsed.value, "  ");
+          if (reparsed.duplicates.length) {
+            const unique = [...new Set(reparsed.duplicates)];
+            findings.push({
+              level: "warn",
+              headline: `Duplicate claim${unique.length === 1 ? "" : "s"}: ${unique.join(", ")}`,
+              detail: "the token names the same claim twice. Parsers disagree about which one wins, so two servers can read this token differently — a known way to smuggle a claim past one of them.",
+            });
+          }
+          if (reparsed.bigNumbers.length) {
+            findings.push({
+              level: "warn",
+              headline: "A number too large to survive parsing",
+              detail: `${reparsed.bigNumbers[0]} is beyond what JavaScript represents exactly. It is printed here as written, but a server reading this token normally will see a different number.`,
+            });
+          }
+        } catch {
+          payloadOut = payloadText;
+        }
+        renderJson(els.payload, payloadOut);
+
         findings.push({
           level: "info",
           headline: "The signature was not checked",
           detail: "that needs the issuer's key. This page only reads what the token says.",
         });
-
         renderFindings(els.findings, findings);
-        renderJson(els.payload, JSON.stringify(payload, null, 2));
 
-        // The verdict speaks only about time, never about validity — this page cannot
-        // establish validity and must not sound as though it has.
+        // No branch is ever `good`. This page cannot establish anything that deserves a
+        // tick, and a green tick is the one element a hurried reader takes as a pass.
         if (alg.toLowerCase() === "none" || !signature) {
           renderVerdict(els.verdict, "bad", "Unsigned token",
             "There is no signature to verify. Treat anything it claims as unproven.");
@@ -271,16 +389,29 @@
           renderVerdict(els.verdict, "warn", "Not usable yet",
             "Its nbf claim puts the start of its window in the future, by your device's clock.");
         } else if (exp !== null) {
-          renderVerdict(els.verdict, "good", `Inside its time window for another ${describeGap(exp - now)}`,
-            "The dates allow it. That is not the same as the signature being good — this page does not check that.");
+          renderVerdict(els.verdict, "info", `Dates allow it for another ${describeGap(exp - now)} — signature unchecked`,
+            "Only the exp and nbf claims were read, against your device's clock. Anyone can write a token whose dates look like this; whether this one is genuine cannot be answered here.");
         } else {
           renderVerdict(els.verdict, "warn", "No expiry set",
             "Nothing in the token limits how long it lasts. The signature is not checked here either.");
         }
 
-        els.results.hidden = false;
-        const claimCount = Object.keys(payload).length;
-        els.status.textContent = `Decoded ${claimCount} claim${claimCount === 1 ? "" : "s"} in this page. Nothing was uploaded, and the signature was not checked.`;
+        const count = Object.keys(payload).length;
+        els.status.textContent = `Read ${count} claim${count === 1 ? "" : "s"} in this page. Nothing was uploaded, and the signature was not checked.`;
+      }
+
+      function run() {
+        const raw = els.input.value;
+        if (!raw.trim()) return;
+        try {
+          render(decode(raw));
+          els.results.hidden = false;
+        } catch (err) {
+          // Any throw reaches the status line. A dead button that reports nothing is the
+          // worst outcome here, so nothing is allowed to fail silently.
+          els.results.hidden = true;
+          els.status.textContent = err && err.message ? err.message : "This token could not be read.";
+        }
       }
 
       function invalidate() {

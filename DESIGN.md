@@ -41,19 +41,22 @@ object — do not link an icon font or a CDN.
 
 Tones map to meaning, not decoration: `good` (accent), `warn`, `bad`, `info` (muted).
 
+`good` is a claim, not a colour. The accent tick is the most glanceable thing on a page and
+reads as a pass, so a tool may only use it for something it has actually established. Where
+the tool cannot establish the thing a reader cares about — the JWT decoder cannot check a
+signature — the best available tone is `info`, however healthy the result looks.
+
 ## Shared chrome
 
 `assets/toolshed.css` holds every shared style. `assets/toolshed.js` owns the icon set and
 renders the footer. A page must not restate either — if a page needs a style that another
 page will also need, it belongs in the stylesheet.
 
-The footer is a short paragraph about what this is, then a row of links: `All tools` (pages
-below the root only) `· Source · What's next · Report a problem`. Both are centred. Do not
-link out to anything that is not this project, and do not add more rows.
-
-It follows the portfolio's footer: centered, generous padding above a `--line` rule, 0.75rem
-muted text, links underlined at a 4px offset that lift to `--fg` on hover, `·` separators in
-`--line-strong`. Footer links are never accent green — the accent is for things you act on.
+The footer is a single short paragraph and nothing else — no links row. `renderFooter()`
+picks the sentence from `data-sends` on `<body>`: a page that names what it contacts gets a
+sentence saying so, and a page without the attribute gets one saying nothing leaves the
+browser. A blanket privacy claim on every page was false on the tools that do reach the
+network, which is why the wording is per-page rather than fixed.
 
 Every page ends with the shared footer via `renderFooter()`, which appends it to `<body>` as
 a sibling of `<main>` — the sticky-footer layout depends on that, so do not nest it inside
@@ -77,6 +80,11 @@ A tool with two panes side by side opts in with `<main class="wide">`, which wid
 column to 72rem and takes the footer with it so the rule underneath lines up. Everything
 else stays at the 46rem reading width — do not widen a page just because it has a lot of
 output. Panes collapse to one column below 52rem.
+
+Any block that renders attacker-controlled content needs a bound. `.output` carries a
+`max-height` and scrolls; a table built from parsed input caps its rows and says how many
+were left out. Without a bound, a large document pushes `.caveats` hundreds of thousands of
+pixels down, and limits nobody can reach are not stated on the page.
 
 Both panes are a fixed height and scroll inside themselves. A pane that grows with its
 content pushes the buttons and the results off the bottom of the page, so a large document
