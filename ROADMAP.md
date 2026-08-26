@@ -46,7 +46,7 @@ Fully offline. Nothing leaves the browser — say so on every page.
 | --- | --- | --- | --- |
 | Link inspector | `link` | on-portfolio | Punycode/IDN homograph detection, unwrap Outlook/Proofpoint safelinks, explain tracking params |
 | Hidden characters | `unicode` | on-portfolio | Zero-width, homoglyphs, smart quotes, NBSP — catches phishing and broken code |
-| JWT decoder | `jwt` | idea | Decode only, never leaves the browser |
+| JWT decoder | `jwt` | shipped | Decode only, never leaves the browser |
 | Certificate decoder | `cert` | idea | Paste PEM → issuer, subject, SANs, validity |
 | Prompt injection scan | `injection-scan` | on-portfolio | Paste content an agent is about to read. See the note below before building |
 
@@ -112,14 +112,13 @@ Cut deliberately. Recorded so they don't get re-added by accident.
 Build in this order when nothing is `building`. Ordered by how badly a page beats asking,
 not by how interesting the tool is:
 
-1. `jwt` — secret-bearing and frequent. The archetype for this collection.
-2. `encode` — highest frequency on the list, and base64 is how credentials travel.
-3. `timestamp` — ten times a day, zero judgement needed.
-4. `ids` — `crypto.randomUUID()` is a CSPRNG; a model-generated UUID only looks random.
-5. `text` — the bulk case.
-6. `contrast` — the interactive case.
-7. `hash` — right for files you would never upload to a chat, but infrequent.
-8. `cert` — same secret argument as `jwt`, much rarer.
+1. `encode` — highest frequency on the list, and base64 is how credentials travel.
+2. `timestamp` — ten times a day, zero judgement needed.
+3. `ids` — `crypto.randomUUID()` is a CSPRNG; a model-generated UUID only looks random.
+4. `text` — the bulk case.
+5. `contrast` — the interactive case.
+6. `hash` — right for files you would never upload to a chat, but infrequent.
+7. `cert` — same secret argument as `jwt`, much rarer.
 
 ## Rules
 

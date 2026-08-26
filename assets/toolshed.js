@@ -133,4 +133,31 @@ export function bindSubmitEnabled(field, button, onEdit) {
   return sync;
 }
 
+
+/**
+ * Colours a formatted JSON string. Builds one HTML string rather than a node per token —
+ * the node-per-token approach is what locks a tab up on a large document — and returns
+ * plain text above `limit` so a huge payload stays responsive.
+ */
+export function highlightJson(text, limit = 300000) {
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  if (text.length > limit) return { html: null, text };
+  const html = escaped.replace(
+    /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+    (match, str, colon, lit, num) => {
+      if (str) return `<span class="${colon ? "t-key" : "t-str"}">${str}</span>${colon || ""}`;
+      if (lit) return `<span class="t-lit">${lit}</span>`;
+      return `<span class="t-num">${num}</span>`;
+    },
+  );
+  return { html, text };
+}
+
+/** Writes highlighted JSON into an element, falling back to plain text when too large. */
+export function renderJson(el, text, limit) {
+  const { html } = highlightJson(text, limit);
+  if (html === null) el.textContent = text;
+  else el.innerHTML = html;
+}
+
 renderFooter();

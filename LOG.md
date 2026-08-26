@@ -94,7 +94,7 @@ Gave the JSON panes a fixed height that scrolls internally. They had been growin
 their content, so a 6,000-line document made the page 150,000px tall and pushed every button
 and the results below the fold. Also removed the drag handle from every textarea.
 
-Next: `jwt`, then `ip`, then `cert`.
+
 
 Collapsed the portfolio's `shipped` list from six per-tool entries down to one Toolshed
 entry linking to the collection. Six near-identical rows, all pointing at the same repo,
@@ -153,4 +153,26 @@ Gave the JSON panes a fixed height that scrolls internally. They had been growin
 their content, so a 6,000-line document made the page 150,000px tall and pushed every button
 and the results below the fold. Also removed the drag handle from every textarea.
 
-Next: `jwt`, then `ip`, then `cert`.
+## 2026-08-26
+Shipped `jwt`. The whole tool turns on one distinction: decoding is not verifying. The
+signature can only be checked with the issuer's key, which this page does not have and
+should never be handed, so nothing in the wording is allowed to imply the token is genuine.
+The verdict speaks only about time — "Inside its time window", never "valid" — and a
+permanent finding says the signature was not checked rather than leaving it to the caveats
+where it could be missed.
+
+Flags `alg: none` and an empty signature as unsigned, warns on no expiry, a lifetime over
+thirty days, and an `nbf` still in the future, and notes when the payload carries personal
+data, since base64 is encoding rather than encryption and anyone holding the token can read
+it.
+
+Hoisted the JSON highlighter out of `tools/json` into `assets/toolshed.js` as `highlightJson`
+and `renderJson`, because a JWT payload is JSON too. Second caller, so it moves, per the
+rules. Verified the json tool still renders highlighted output afterwards.
+
+Verified against alg none, empty signature, a live token, no expiry, a future nbf, a
+400-day lifetime, a `Bearer ` prefix, a quoted token, a UTF-8 payload, two-part input,
+five-part JWE, garbage and invalid base64. Console clean, 360 and 390 checked.
+
+Next: `encode`, then `timestamp`, then `ids`.
+

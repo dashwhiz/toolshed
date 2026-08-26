@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JWT decoder — Toolshed</title>
+    <meta
+      name="description"
+      content="Read what is inside a JSON Web Token — claims, expiry and algorithm — without pasting a live credential into someone else's website."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main>
+      <h1>JWT decoder</h1>
+      <p class="lede">
+        See what a token actually says — who issued it, who it is for, when it stops working.
+        A JWT is a live credential, and this page reads it here rather than sending it
+        anywhere. Nothing is uploaded.
+      </p>
+
+      <textarea
+        id="input"
+        spellcheck="false"
+        aria-label="JSON Web Token to decode"
+        placeholder="eyJhbGciOi..."
+      ></textarea>
+      <div class="actions">
+        <button id="go" type="button">Decode</button>
+        <button id="sample" class="secondary" type="button">Try an example</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <p class="note" id="status" role="status" aria-live="polite">
+        Nothing is uploaded. The token is decoded in this page.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <div class="verdict" id="verdict"></div>
+
+        <p class="label">What stood out</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Header</p>
+        <dl id="header"></dl>
+
+        <p class="label">Claims</p>
+        <dl id="claims"></dl>
+
+        <p class="label">Payload</p>
+        <pre class="output" id="payload"></pre>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li><strong>Whether the token is genuine.</strong> Decoding and verifying are different things. The signature can only be checked with the issuer's key, which this page does not have and should never be given. Anyone can write a token that decodes perfectly.</li>
+          <li>Whether the server still accepts it. A token inside its time window can already have been revoked, and the clock compared against here is your own device's.</li>
+          <li>The payload is not secret. Base64 is encoding, not encryption — everything shown here is readable by anyone holding the token, which is why a JWT should never carry anything you would mind seeing.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled, renderJson } from "../../assets/toolshed.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        findings: document.getElementById("findings"),
+        header: document.getElementById("header"),
+        claims: document.getElementById("claims"),
+        payload: document.getElementById("payload"),
+        go: document.getElementById("go"),
+        sample: document.getElementById("sample"),
+        clear: document.getElementById("clear"),
+      };
+
+      // Signed with the well-known "your-256-bit-secret" example key, so it is not a
+      // credential for anything. Expiry is in the past on purpose.
+      const SAMPLE =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleS0yMDI0LTA5In0." +
+        "eyJpc3MiOiJodHRwczovL2F1dGguZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyXzQ4MjEiLCJhdWQiOiJodHRwczovL2FwaS5leGFtcGxlLmNvbSIsImlhdCI6MTcyNTAwMDAwMCwiZXhwIjoxNzI1MDAzNjAwLCJlbWFpbCI6ImFkYUBleGFtcGxlLmNvbSIsInJvbGVzIjpbImFkbWluIiwiZWRpdG9yIl19." +
+        "S3lQb0N0ZW5TaWduYXR1cmVOb3RWZXJpZmllZEhlcmU";
+
+      const CLAIM_NAMES = {
+        iss: "who issued it",
+        sub: "who it is about",
+        aud: "who should accept it",
+        exp: "expires",
+        nbf: "not valid before",
+        iat: "issued at",
+        jti: "token id",
+        azp: "authorised party",
+        scope: "scope",
+        scp: "scope",
+      };
+
+      const HEADER_NAMES = {
+        alg: "Signing algorithm",
+        typ: "Type",
+        kid: "Key id",
+        cty: "Content type",
+        enc: "Encryption",
+      };
+
+      // Claims whose presence means the token is carrying personal data around.
+      const PERSONAL = ["email", "name", "given_name", "family_name", "phone_number",
+        "preferred_username", "picture", "address", "birthdate"];
+
+      function b64urlDecode(part) {
+        const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+        let binary;
+        try {
+          binary = atob(padded);
+        } catch {
+          throw new Error("this section is not valid base64url");
+        }
+        const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+        return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      }
+
+      const fmtTime = (seconds) =>
+        new Date(seconds * 1000).toLocaleString(undefined, {
+          year: "numeric", month: "short", day: "numeric",
+          hour: "2-digit", minute: "2-digit",
+        });
+
+      function describeGap(ms) {
+        const abs = Math.abs(ms);
+        const minutes = Math.round(abs / 60000);
+        if (minutes < 1) return "less than a minute";
+        if (minutes < 90) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+        const hours = Math.round(minutes / 60);
+        if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+        const days = Math.round(hours / 24);
+        if (days < 60) return `${days} day${days === 1 ? "" : "s"}`;
+        const months = Math.round(days / 30);
+        return months < 24 ? `${months} months` : `${(days / 365).toFixed(1)} years`;
+      }
+
+      function decode(raw) {
+        const token = raw.trim().replace(/^["'`]|["'`]$/g, "").replace(/^Bearer\s+/i, "");
+        const parts = token.split(".");
+
+        if (parts.length === 5) {
+          throw new Error("This is an encrypted token (JWE). Its contents cannot be read without the decryption key.");
+        }
+        if (parts.length !== 3) {
+          throw new Error(`A JWT has three sections separated by dots. This has ${parts.length}.`);
+        }
+
+        let header, payload;
+        try {
+          header = JSON.parse(b64urlDecode(parts[0]));
+        } catch (err) {
+          throw new Error(`The header could not be read — ${err.message}`);
+        }
+        try {
+          payload = JSON.parse(b64urlDecode(parts[1]));
+        } catch (err) {
+          throw new Error(`The payload could not be read — ${err.message}`);
+        }
+        if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+          throw new Error("The payload decoded, but it is not a JSON object.");
+        }
+        return { header, payload, signature: parts[2], token };
+      }
+
+      function run() {
+        const raw = els.input.value;
+        if (!raw.trim()) return;
+
+        let decoded;
+        try {
+          decoded = decode(raw);
+        } catch (err) {
+          els.results.hidden = true;
+          els.status.textContent = err.message;
+          return;
+        }
+
+        const { header, payload, signature } = decoded;
+        const findings = [];
+        const now = Date.now();
+
+        // Header
+        els.header.replaceChildren();
+        for (const [key, value] of Object.entries(header)) {
+          const label = HEADER_NAMES[key] ? `${key} — ${HEADER_NAMES[key]}` : key;
+          row(els.header, label, typeof value === "string" ? value : JSON.stringify(value), true);
+        }
+
+        const alg = String(header.alg || "");
+        if (!alg) {
+          findings.push({ level: "warn", headline: "No algorithm named", detail: "the header does not say how this was signed." });
+        } else if (alg.toLowerCase() === "none") {
+          findings.push({
+            level: "bad",
+            headline: "This token is unsigned",
+            detail: 'alg is "none", so there is nothing to verify and anyone can write a token like it. A server that accepts this is accepting anything.',
+          });
+        }
+        if (!signature) {
+          findings.push({ level: "bad", headline: "The signature section is empty", detail: "nothing was signed, so nothing can be checked." });
+        }
+
+        // Claims
+        els.claims.replaceChildren();
+        const timeClaims = ["iat", "nbf", "exp"];
+        for (const key of ["iss", "sub", "aud", "jti", "azp", "scope", "scp"]) {
+          if (payload[key] === undefined) continue;
+          const value = Array.isArray(payload[key]) ? payload[key].join(", ") : String(payload[key]);
+          row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, value, true);
+        }
+        for (const key of timeClaims) {
+          const value = payload[key];
+          if (typeof value !== "number") continue;
+          const at = value * 1000;
+          const gap = at - now;
+          const when = gap > 0 ? `in ${describeGap(gap)}` : `${describeGap(gap)} ago`;
+          row(els.claims, `${key} — ${CLAIM_NAMES[key]}`, `${fmtTime(value)} (${when})`);
+        }
+
+        const exp = typeof payload.exp === "number" ? payload.exp * 1000 : null;
+        const nbf = typeof payload.nbf === "number" ? payload.nbf * 1000 : null;
+        const iat = typeof payload.iat === "number" ? payload.iat * 1000 : null;
+
+        if (exp === null) {
+          findings.push({ level: "warn", headline: "No expiry", detail: "the token has no exp claim, so on its own it never stops being accepted." });
+        } else if (exp < now) {
+          findings.push({ level: "warn", headline: `Expired ${describeGap(exp - now)} ago`, detail: `it stopped being usable at ${fmtTime(payload.exp)}.` });
+        }
+        if (nbf !== null && nbf > now) {
+          findings.push({ level: "warn", headline: `Not usable for another ${describeGap(nbf - now)}`, detail: "the nbf claim puts the start of its window in the future." });
+        }
+        if (exp !== null && iat !== null && exp - iat > 30 * 86400000) {
+          findings.push({ level: "warn", headline: `Lifetime of ${describeGap(exp - iat)}`, detail: "a long-lived token is a long-lived problem if it leaks." });
+        }
+
+        const personal = PERSONAL.filter((k) => payload[k] !== undefined);
+        if (personal.length) {
+          findings.push({
+            level: "info",
+            headline: `Carries personal data: ${personal.join(", ")}`,
+            detail: "readable by anyone holding this token, since the payload is only encoded, not encrypted.",
+          });
+        }
+
+        findings.push({
+          level: "info",
+          headline: "The signature was not checked",
+          detail: "that needs the issuer's key. This page only reads what the token says.",
+        });
+
+        renderFindings(els.findings, findings);
+        renderJson(els.payload, JSON.stringify(payload, null, 2));
+
+        // The verdict speaks only about time, never about validity — this page cannot
+        // establish validity and must not sound as though it has.
+        if (alg.toLowerCase() === "none" || !signature) {
+          renderVerdict(els.verdict, "bad", "Unsigned token",
+            "There is no signature to verify. Treat anything it claims as unproven.");
+        } else if (exp !== null && exp < now) {
+          renderVerdict(els.verdict, "warn", `Expired ${describeGap(exp - now)} ago`,
+            "Past its exp claim, by your device's clock. Whether it was ever genuine is a separate question this page cannot answer.");
+        } else if (nbf !== null && nbf > now) {
+          renderVerdict(els.verdict, "warn", "Not usable yet",
+            "Its nbf claim puts the start of its window in the future, by your device's clock.");
+        } else if (exp !== null) {
+          renderVerdict(els.verdict, "good", `Inside its time window for another ${describeGap(exp - now)}`,
+            "The dates allow it. That is not the same as the signature being good — this page does not check that.");
+        } else {
+          renderVerdict(els.verdict, "warn", "No expiry set",
+            "Nothing in the token limits how long it lasts. The signature is not checked here either.");
+        }
+
+        els.results.hidden = false;
+        const claimCount = Object.keys(payload).length;
+        els.status.textContent = `Decoded ${claimCount} claim${claimCount === 1 ? "" : "s"} in this page. Nothing was uploaded, and the signature was not checked.`;
+      }
+
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Decode to read this token.";
+      }
+
+      bindSubmitEnabled(els.input, els.go, invalidate);
+      els.go.addEventListener("click", run);
+      els.sample.addEventListener("click", () => {
+        els.input.value = SAMPLE;
+        els.input.dispatchEvent(new Event("input"));
+        run();
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. The token is decoded in this page.";
+        els.input.focus();
+      });
+    </script>
+  </body>
+</html>

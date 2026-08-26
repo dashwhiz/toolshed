@@ -60,7 +60,7 @@
     </main>
 
     <script type="module">
-      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { row, renderFindings, bindSubmitEnabled, renderJson } from "../../assets/toolshed.js";
 
       const els = {
         input: document.getElementById("input"),
@@ -289,19 +289,6 @@
 
       // Highlighting builds one HTML string rather than a node per token, and is skipped
       // entirely on very large documents so the tab never locks up.
-      const HIGHLIGHT_LIMIT = 300000;
-      function highlight(text) {
-        const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        return escaped.replace(
-          /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
-          (match, str, colon, lit, num) => {
-            if (str) return `<span class="${colon ? "t-key" : "t-str"}">${str}</span>${colon || ""}`;
-            if (lit) return `<span class="t-lit">${lit}</span>`;
-            return `<span class="t-num">${num}</span>`;
-          },
-        );
-      }
-
       let lastOutput = "";
 
       function run(minify) {
@@ -365,8 +352,7 @@
         const text = stringify(value, minify ? "" : "  ");
         lastOutput = text;
 
-        if (text.length > HIGHLIGHT_LIMIT) els.output.textContent = text;
-        else els.output.innerHTML = highlight(text);
+        renderJson(els.output, text);
 
         if (repairs.length) {
           notes.push({ level: "warn", headline: "This was not valid JSON", detail: `repaired by: ${repairs.join(", ")}. Check the result against what you expected.` });
