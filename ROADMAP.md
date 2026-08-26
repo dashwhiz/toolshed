@@ -46,7 +46,7 @@ Fully offline. Nothing leaves the browser — say so on every page.
 | --- | --- | --- | --- |
 | Link inspector | `link` | on-portfolio | Punycode/IDN homograph detection, unwrap Outlook/Proofpoint safelinks, explain tracking params |
 | Hidden characters | `unicode` | on-portfolio | Zero-width, homoglyphs, smart quotes, NBSP — catches phishing and broken code |
-| JWT decoder | `jwt` | shipped | Decode only, never leaves the browser |
+| JWT decoder | `jwt` | on-portfolio | Decode only, never leaves the browser |
 | Certificate decoder | `cert` | idea | Paste PEM → issuer, subject, SANs, validity |
 | Prompt injection scan | `injection-scan` | on-portfolio | Paste content an agent is about to read. See the note below before building |
 

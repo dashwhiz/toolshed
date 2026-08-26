@@ -174,5 +174,8 @@ Verified against alg none, empty signature, a live token, no expiry, a future nb
 400-day lifetime, a `Bearer ` prefix, a quoted token, a UTF-8 payload, two-part input,
 five-part JWE, garbage and invalid base64. Console clean, 360 and 390 checked.
 
-Next: `encode`, then `timestamp`, then `ids`.
+Portfolio untouched: its single Toolshed entry already covers this, and the blurb's
+"is this website real, where does a link go, what is hidden in text" framing does not
+change because a token decoder joined the collection. Marked `on-portfolio` directly.
 
+Next: `encode`, then `timestamp`, then `ids`.
