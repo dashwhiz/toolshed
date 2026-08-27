@@ -75,7 +75,7 @@ Note in `.caveats` that a site can serve the agent different content than it ser
 | Timestamp converter | `timestamp` | idea | Epoch ⇄ human, timezone aware |
 | ID generator | `ids` | idea | UUID v4, ULID, nanoid, bulk + copy |
 | Hash generator | `hash` | idea | SHA-1/256/512 via WebCrypto (no MD5 — WebCrypto has none) |
-| Encode/decode bench | `encode` | idea | Base64, URL, HTML entities. Text and file input |
+| Encode/decode bench | `encode` | shipped | Base64, URL, HTML entities. Text and file input |
 | Text bench | `text` | idea | Case convert, sort, dedupe, trim, count — bulk lines |
 | Colour contrast | `contrast` | idea | WCAG AA/AAA, suggest nearest passing shade |
 
@@ -112,13 +112,12 @@ Cut deliberately. Recorded so they don't get re-added by accident.
 Build in this order when nothing is `building`. Ordered by how badly a page beats asking,
 not by how interesting the tool is:
 
-1. `encode` — highest frequency on the list, and base64 is how credentials travel.
-2. `timestamp` — ten times a day, zero judgement needed.
-3. `ids` — `crypto.randomUUID()` is a CSPRNG; a model-generated UUID only looks random.
-4. `text` — the bulk case.
-5. `contrast` — the interactive case.
-6. `hash` — right for files you would never upload to a chat, but infrequent.
-7. `cert` — same secret argument as `jwt`, much rarer.
+1. `timestamp` — ten times a day, zero judgement needed.
+2. `ids` — `crypto.randomUUID()` is a CSPRNG; a model-generated UUID only looks random.
+3. `text` — the bulk case.
+4. `contrast` — the interactive case.
+5. `hash` — right for files you would never upload to a chat, but infrequent.
+6. `cert` — same secret argument as `jwt`, much rarer.
 
 ## Rules
 

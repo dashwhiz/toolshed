@@ -223,6 +223,31 @@ textarea {
 textarea::placeholder { color: var(--muted); }
 textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+select {
+  padding: 0.55rem 0.7rem;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+}
+select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+select option { background: var(--bg); color: var(--fg); }
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 2rem;
+}
+.choices label { color: var(--muted); font-size: 0.8rem; }
+@media (max-width: 30rem) {
+  .choices { flex-direction: column; align-items: stretch; }
+  .choices select { width: 100%; }
+}
+
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 .actions button { flex: 0 0 auto; }
 button.secondary { background: none; border: 1px solid var(--line-strong); color: var(--fg); }

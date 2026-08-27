@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Encode/decode bench — Toolshed</title>
+    <meta
+      name="description"
+      content="Base64, URL and HTML entity encoding that handles accents, emoji and binary correctly, and tells you what the decoded bytes actually are."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body data-home="../../">
+    <main class="wide">
+      <h1>Encode/decode bench</h1>
+      <p class="lede">
+        Base64, URL escaping and HTML entities, in both directions. Handles accents, emoji
+        and binary properly, and says what came back out rather than printing whatever the
+        bytes happen to look like.
+      </p>
+
+      <div class="choices">
+        <label for="format">Format</label>
+        <select id="format">
+          <option value="base64">Base64</option>
+          <option value="base64url">Base64, URL-safe</option>
+          <option value="url">URL escaping</option>
+          <option value="entities">HTML entities</option>
+        </select>
+      </div>
+
+      <div class="panes">
+        <div class="pane">
+          <span class="pane-label">Input</span>
+          <textarea id="input" spellcheck="false" aria-label="Text to encode or decode"
+            placeholder="Paste text, or load a file"></textarea>
+        </div>
+        <div class="pane">
+          <span class="pane-label">Output</span>
+          <pre class="output" id="output" aria-live="polite"></pre>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="go" type="button">Encode</button>
+        <button id="decode" type="button" class="secondary">Decode</button>
+        <button id="copy" class="secondary" type="button">Copy</button>
+        <button id="file" class="secondary" type="button">Load a file</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <input id="picker" type="file" hidden />
+      <p class="note" id="status" role="status" aria-live="polite">
+        Nothing is uploaded. The conversion happens in this page.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <p class="label">Notes</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">What went through</p>
+        <dl id="stats"></dl>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li><strong>Encoding is not encryption.</strong> Base64 hides nothing. Anyone holding the encoded text holds the original, which is worth remembering given how often credentials travel this way.</li>
+          <li>Decoded bytes are only shown as text when they are valid UTF-8. When they are not, you get the size and the likely file type instead — printing them as text would show you something the bytes do not say.</li>
+          <li>HTML entity decoding covers named, decimal and hexadecimal entities. It does not interpret surrounding markup, so a literal tag in the input is left exactly as it was found.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { scanText } from "../../assets/scan.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        output: document.getElementById("output"),
+        format: document.getElementById("format"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        findings: document.getElementById("findings"),
+        stats: document.getElementById("stats"),
+        go: document.getElementById("go"),
+        decode: document.getElementById("decode"),
+        copy: document.getElementById("copy"),
+        file: document.getElementById("file"),
+        picker: document.getElementById("picker"),
+        clear: document.getElementById("clear"),
+      };
+
+      const MAX_FILE = 1024 * 1024;
+      const CHUNK = 0x8000;
+
+      // Leading bytes that identify a format, so binary output can be described rather
+      // than printed as mojibake.
+      const MAGIC = [
+        [[0x89, 0x50, 0x4e, 0x47], "a PNG image"],
+        [[0xff, 0xd8, 0xff], "a JPEG image"],
+        [[0x47, 0x49, 0x46, 0x38], "a GIF image"],
+        [[0x25, 0x50, 0x44, 0x46], "a PDF"],
+        [[0x50, 0x4b, 0x03, 0x04], "a ZIP archive (or an office document)"],
+        [[0x1f, 0x8b], "gzip-compressed data"],
+        [[0x52, 0x49, 0x46, 0x46], "a RIFF container (WAV or WEBP)"],
+        [[0x00, 0x00, 0x01, 0x00], "an ICO icon"],
+        [[0x4f, 0x67, 0x67, 0x53], "an Ogg stream"],
+      ];
+
+      const textEncoder = new TextEncoder();
+
+      function bytesToBinary(bytes) {
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+        }
+        return binary;
+      }
+
+      function toBase64(bytes, urlSafe) {
+        const b64 = btoa(bytesToBinary(bytes));
+        return urlSafe ? b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : b64;
+      }
+
+      function fromBase64(text) {
+        // Whitespace is normal in pasted base64, and the padding has to be recomputed
+        // after it is stripped rather than before.
+        const cleaned = text.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+        if (!cleaned) throw new Error("There is nothing here to decode.");
+        if (/[^A-Za-z0-9+/=]/.test(cleaned)) {
+          const bad = cleaned.match(/[^A-Za-z0-9+/=]/)[0];
+          throw new Error(`This is not base64 — it contains ${JSON.stringify(bad)}.`);
+        }
+        const padded = cleaned + "=".repeat((4 - (cleaned.length % 4)) % 4);
+        let binary;
+        try {
+          binary = atob(padded);
+        } catch {
+          throw new Error("This is not valid base64. The length is wrong once padding is applied.");
+        }
+        return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      }
+
+      const ENTITY = /&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]{1,31});/g;
+      const entityCache = new Map();
+
+      /**
+       * Decodes one entity at a time through DOMParser, which knows every named entity
+       * and runs no script. Passing the whole document through it instead would strip
+       * any literal markup the input happened to contain.
+       */
+      function decodeEntity(match) {
+        if (entityCache.has(match)) return entityCache.get(match);
+        const parsed = new DOMParser().parseFromString(match, "text/html");
+        const text = parsed.documentElement.textContent;
+        const out = text === match ? match : text;
+        entityCache.set(match, out);
+        return out;
+      }
+
+      const encodeEntities = (text) =>
+        text.replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        })[c]);
+
+      function describeBytes(bytes) {
+        for (const [magic, name] of MAGIC) {
+          if (magic.every((b, i) => bytes[i] === b)) return name;
+        }
+        return null;
+      }
+
+      const hexPreview = (bytes) =>
+        [...bytes.subarray(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+      /** Only returns text when the bytes really are UTF-8; never guesses. */
+      function bytesToText(bytes) {
+        try {
+          return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          return null;
+        }
+      }
+
+      let lastOutput = "";
+      let loadedFile = null;
+
+      function analyseDecoded(text, findings) {
+        const trimmed = text.trim();
+        if (/^[\w-]+\.[\w-]+\.[\w-]*$/.test(trimmed)) {
+          findings.push({
+            level: "info",
+            headline: "This looks like a JWT",
+            detail: "three dot-separated sections. The JWT decoder in this collection reads the claims and dates properly.",
+          });
+        } else if (/^[{[]/.test(trimmed)) {
+          try {
+            JSON.parse(trimmed);
+            findings.push({ level: "info", headline: "The result is JSON", detail: "it parses cleanly." });
+          } catch {
+            findings.push({ level: "info", headline: "The result looks like JSON but does not parse", detail: "it starts with a brace or bracket and then breaks." });
+          }
+        }
+        const scan = scanText(text);
+        const notable = scan.groups.filter((g) => g.level === "bad" || g.level === "warn");
+        if (notable.length) {
+          findings.push({
+            level: "warn",
+            headline: `Hidden characters in the result: ${notable.map((g) => g.label).join(", ")}`,
+            detail: "the decoded text is not only what it appears to be.",
+          });
+        }
+      }
+
+      function run(direction) {
+        const format = els.format.value;
+        const findings = [];
+        const source = els.input.value;
+
+        if (!loadedFile && !source.trim()) return;
+
+        let output = "";
+        let inputBytes = null;
+        let outputBytes = null;
+
+        try {
+          if (direction === "encode") {
+            inputBytes = loadedFile ? loadedFile.bytes : textEncoder.encode(source);
+            if (format === "base64" || format === "base64url") {
+              output = toBase64(inputBytes, format === "base64url");
+            } else if (loadedFile) {
+              throw new Error("A file can only be encoded as base64. Choose Base64, or clear the file.");
+            } else if (format === "url") {
+              output = encodeURIComponent(source);
+            } else {
+              output = encodeEntities(source);
+            }
+          } else {
+            if (loadedFile) throw new Error("A loaded file is already raw bytes. There is nothing to decode.");
+            if (format === "base64" || format === "base64url") {
+              outputBytes = fromBase64(source);
+              const text = bytesToText(outputBytes);
+              if (text === null) {
+                const kind = describeBytes(outputBytes);
+                output = "";
+                findings.push({
+                  level: "info",
+                  headline: kind ? `The bytes are ${kind}` : "The bytes are not text",
+                  detail: `${outputBytes.length.toLocaleString()} bytes that are not valid UTF-8, so there is nothing to show as text. First bytes: ${hexPreview(outputBytes)}.`,
+                });
+              } else {
+                output = text;
+                analyseDecoded(text, findings);
+              }
+            } else if (format === "url") {
+              try {
+                output = decodeURIComponent(source);
+              } catch {
+                throw new Error("This is not valid URL escaping — it contains a % that is not followed by two hex digits.");
+              }
+              analyseDecoded(output, findings);
+            } else {
+              output = source.replace(ENTITY, decodeEntity);
+              analyseDecoded(output, findings);
+            }
+          }
+        } catch (err) {
+          els.results.hidden = true;
+          els.output.textContent = "";
+          lastOutput = "";
+          els.status.textContent = err && err.message ? err.message : "That could not be converted.";
+          syncButtons();
+          return;
+        }
+
+        lastOutput = output;
+        els.output.textContent = output;
+
+        els.stats.replaceChildren();
+        if (loadedFile) {
+          row(els.stats, "File", loadedFile.name);
+          row(els.stats, "Type", loadedFile.type || "not reported by the browser");
+          row(els.stats, "Size", `${loadedFile.bytes.length.toLocaleString()} bytes`, true);
+          row(els.stats, "As a data URI", `data:${loadedFile.type || "application/octet-stream"};base64,…`, true);
+        } else {
+          row(els.stats, "Input", `${source.length.toLocaleString()} characters`, true);
+          if (inputBytes) row(els.stats, "Which is", `${inputBytes.length.toLocaleString()} bytes as UTF-8`, true);
+        }
+        if (outputBytes) row(els.stats, "Decoded to", `${outputBytes.length.toLocaleString()} bytes`, true);
+        else row(els.stats, "Output", `${output.length.toLocaleString()} characters`, true);
+
+        if (direction === "encode" && inputBytes && inputBytes.length !== source.length && !loadedFile) {
+          findings.push({
+            level: "info",
+            headline: "The input is not plain ASCII",
+            detail: `${source.length.toLocaleString()} characters take ${inputBytes.length.toLocaleString()} bytes as UTF-8. Encoders that assume one byte per character corrupt text like this.`,
+          });
+        }
+        if (!findings.length) {
+          findings.push({ level: "good", headline: direction === "encode" ? "Encoded" : "Decoded", detail: "nothing unusual came up." });
+        }
+        renderFindings(els.findings, findings);
+
+        els.results.hidden = false;
+        els.status.textContent = `${direction === "encode" ? "Encoded" : "Decoded"} in this page. Nothing was uploaded.`;
+        syncButtons();
+      }
+
+      function syncButtons() {
+        const hasInput = loadedFile !== null || els.input.value.trim() !== "";
+        els.go.disabled = !hasInput;
+        els.decode.disabled = !hasInput || loadedFile !== null;
+        els.copy.disabled = !lastOutput;
+      }
+
+      function invalidate() {
+        loadedFile = null;
+        els.input.readOnly = false;
+        if (!els.results.hidden || els.output.textContent) {
+          els.results.hidden = true;
+          els.output.textContent = "";
+          lastOutput = "";
+          els.status.textContent = "Press Encode or Decode to convert this.";
+        }
+        syncButtons();
+      }
+
+      bindSubmitEnabled(els.input, els.go, invalidate);
+      els.format.addEventListener("change", () => {
+        if (els.results.hidden && !els.output.textContent) return;
+        els.results.hidden = true;
+        els.output.textContent = "";
+        lastOutput = "";
+        els.status.textContent = "Format changed. Press Encode or Decode again.";
+        syncButtons();
+      });
+
+      els.go.addEventListener("click", () => run("encode"));
+      els.decode.addEventListener("click", () => run("decode"));
+      els.file.addEventListener("click", () => els.picker.click());
+
+      els.picker.addEventListener("change", async () => {
+        const file = els.picker.files && els.picker.files[0];
+        els.picker.value = "";
+        if (!file) return;
+        if (file.size > MAX_FILE) {
+          els.status.textContent = `That file is ${(file.size / 1048576).toFixed(1)} MB. This page stops at 1 MB, because base64 grows the text by a third and a bigger one would lock the tab up.`;
+          return;
+        }
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        loadedFile = { name: file.name, type: file.type, bytes };
+        els.input.value = `${file.name} — ${bytes.length.toLocaleString()} bytes loaded. Press Encode.`;
+        els.input.readOnly = true;
+        els.results.hidden = true;
+        els.output.textContent = "";
+        lastOutput = "";
+        if (els.format.value === "url" || els.format.value === "entities") els.format.value = "base64";
+        els.status.textContent = "File held in this page only. Press Encode to see it as base64.";
+        syncButtons();
+      });
+
+      els.copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(lastOutput);
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
+      });
+
+      els.clear.addEventListener("click", () => {
+        loadedFile = null;
+        els.input.readOnly = false;
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.output.textContent = "";
+        lastOutput = "";
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. The conversion happens in this page.";
+        els.input.focus();
+        syncButtons();
+      });
+
+      syncButtons();
+    </script>
+  </body>
+</html>
