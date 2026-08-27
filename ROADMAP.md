@@ -75,7 +75,7 @@ Note in `.caveats` that a site can serve the agent different content than it ser
 | Timestamp converter | `timestamp` | idea | Epoch ⇄ human, timezone aware |
 | ID generator | `ids` | idea | UUID v4, ULID, nanoid, bulk + copy |
 | Hash generator | `hash` | idea | SHA-1/256/512 via WebCrypto (no MD5 — WebCrypto has none) |
-| Encode/decode bench | `encode` | shipped | Base64, URL, HTML entities. Text and file input |
+| Encode/decode bench | `encode` | on-portfolio | Base64, URL, HTML entities. Text and file input |
 | Text bench | `text` | idea | Case convert, sort, dedupe, trim, count — bulk lines |
 | Colour contrast | `contrast` | idea | WCAG AA/AAA, suggest nearest passing shade |
 

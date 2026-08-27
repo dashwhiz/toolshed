@@ -218,3 +218,47 @@ DESIGN.md now describes the footer that actually exists — one paragraph, no li
 the sentence chosen by `data-sends`. The blanket privacy claim it replaced was false on the
 tools that do reach the network.
 
+## 2026-08-27
+Shipped `encode` — base64, base64url, URL escaping and HTML entities, both directions, plus
+file to base64. UTF-8 goes through `TextEncoder` in chunks rather than `btoa`, which throws
+on anything outside Latin-1; accents, CJK and astral emoji round-trip exactly. Decoded bytes
+are only shown as text when they really are UTF-8, otherwise you get the size and what the
+first bytes match, because printing bytes as text shows you something they do not say.
+
+The review found no Critical, one bad performance bug and five places the wording claimed
+more than the code had established.
+
+The slow one: entity decoding built a whole `DOMParser` document per entity, and the cache
+could not help because `&#65;`, `&#065;`, `&#0000065;` are endlessly many distinct valid
+keys. A 10 MB paste blocked the main thread for ten seconds and left 1.2 million cache
+entries alive for the life of the page. Numeric entities are now arithmetic — including
+HTML's windows-1252 remap, so `&#128;` is a euro sign — and named ones resolve in a single
+parse for the whole document. Same input now blocks for 850 ms and caches nothing.
+
+The honesty ones all took the same shape: a message asserting something the code had not
+checked. `%FF` was reported as "a % not followed by two hex digits" when the escapes were
+perfectly well formed and the bytes simply were not UTF-8. A 1,048,577-byte file was refused
+with "That file is 1.0 MB. This page stops at 1 MB", which reads as a bug in the tool. Two
+dots was enough to call something a JWT, so a base64'd `www.example.com` or `4.19.0` was
+announced as a token and the reader sent to a decoder that would fail; a JWT claim now
+requires a first segment that actually decodes to JSON naming an algorithm. Four bytes were
+enough to assert "The bytes are a PNG image" — the signature is eight, and it now says "the
+first bytes match" and requires enough payload to be plausible.
+
+Also fixed: a stale error survived a format change, so the screen said "This is not base64"
+while the tool was in URL mode; text typed while a file was being read was silently
+overwritten; an empty file got a green pass on a blank pane.
+
+Removed `data-home` from all nine tool pages. `renderFooter` stopped reading it when the
+footer became one sentence, and DESIGN.md still described a wordmark that nothing rendered.
+The footer stays as it is; the docs now match it.
+
+Note on this machine: `localhost` resolves to IPv6 while `python3 -m http.server` binds IPv4,
+so curl hangs with exit 28. Use `127.0.0.1`. Some ports refuse curl but answer fine from
+Python and the browser, which is worth remembering before assuming a server failed to start.
+
+`encode` is on-portfolio; the portfolio's single Toolshed entry already covers it and its
+blurb already mentions the everyday tools, so that repo was not touched.
+
+Next: `timestamp`, then `ids`, then `text`.
+
