@@ -7,11 +7,9 @@ Binding for every page in this repo. If a rule here and a habit disagree, the ru
 
 - **No emoji.** Not in the UI, not in headings, not in commit messages, not in docs.
   Use an icon from the set below. If no icon fits, use words.
-- **No in-page navigation.** No back links, no breadcrumbs, no "return to index" at the top
-  of a page. The browser already has a back button and people know how to use it.
-  The one exception is the wordmark in the shared footer, which every page below the root
-  carries via `data-home` — a bookmark or a shared link has no history to go back to, and
-  without it the only way out is editing the URL by hand. That is site identity, not chrome.
+- **No in-page navigation.** No back links, no breadcrumbs, no "return to index", and no
+  wordmark. The browser already has a back button and people know how to use it. There is
+  no exception: the footer is one sentence and carries no links at all.
 - **No second background colour.** See below.
 - **No third-party requests at runtime.** Fonts, icons and scripts are served from this
   repo. A page that promises nothing leaves your browser must not phone home for a font.

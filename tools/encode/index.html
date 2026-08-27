@@ -11,7 +11,7 @@
     <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="../../assets/toolshed.css" />
   </head>
-  <body data-home="../../">
+  <body>
     <main class="wide">
       <h1>Encode/decode bench</h1>
       <p class="lede">
@@ -67,7 +67,8 @@
         <ul>
           <li><strong>Encoding is not encryption.</strong> Base64 hides nothing. Anyone holding the encoded text holds the original, which is worth remembering given how often credentials travel this way.</li>
           <li>Decoded bytes are only shown as text when they are valid UTF-8. When they are not, you get the size and the likely file type instead — printing them as text would show you something the bytes do not say.</li>
-          <li>HTML entity decoding covers named, decimal and hexadecimal entities. It does not interpret surrounding markup, so a literal tag in the input is left exactly as it was found.</li>
+          <li>HTML entity decoding covers named, decimal and hexadecimal entities, and follows the HTML rules rather than plain Unicode: <code>&amp;#128;</code> is a euro sign, and a code point that cannot exist comes back as a replacement character. It does not interpret surrounding markup, so a literal tag is left exactly as found, and an entity written without its closing semicolon is left alone even though a browser would decode it.</li>
+          <li>Decoding accepts both base64 alphabets whichever option is chosen, so text using <code>-</code> and <code>_</code> decodes either way. The choice only changes what encoding produces.</li>
         </ul>
       </div>
     </main>
@@ -98,7 +99,7 @@
       // Leading bytes that identify a format, so binary output can be described rather
       // than printed as mojibake.
       const MAGIC = [
-        [[0x89, 0x50, 0x4e, 0x47], "a PNG image"],
+        [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "a PNG image"],
         [[0xff, 0xd8, 0xff], "a JPEG image"],
         [[0x47, 0x49, 0x46, 0x38], "a GIF image"],
         [[0x25, 0x50, 0x44, 0x46], "a PDF"],
@@ -133,31 +134,80 @@
           const bad = cleaned.match(/[^A-Za-z0-9+/=]/)[0];
           throw new Error(`This is not base64 — it contains ${JSON.stringify(bad)}.`);
         }
+        if (/=[^=]/.test(cleaned)) {
+          throw new Error("This is not base64 — there is padding in the middle of it.");
+        }
+        if (cleaned.length % 4 === 1) {
+          throw new Error(`This is not valid base64 — ${cleaned.length} characters cannot be a whole number of groups.`);
+        }
         const padded = cleaned + "=".repeat((4 - (cleaned.length % 4)) % 4);
         let binary;
         try {
           binary = atob(padded);
         } catch {
-          throw new Error("This is not valid base64. The length is wrong once padding is applied.");
+          throw new Error("This is not valid base64. The browser refused to decode it.");
         }
         return Uint8Array.from(binary, (c) => c.charCodeAt(0));
       }
 
       const ENTITY = /&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]{1,31});/g;
-      const entityCache = new Map();
+
+      // HTML remaps this range to windows-1252 rather than treating it as C1 control
+      // codes, which is why &#128; is a euro sign and not an invisible character.
+      const C1_REMAP = {
+        128: 0x20ac, 130: 0x201a, 131: 0x0192, 132: 0x201e, 133: 0x2026, 134: 0x2020,
+        135: 0x2021, 136: 0x02c6, 137: 0x2030, 138: 0x0160, 139: 0x2039, 140: 0x0152,
+        142: 0x017d, 145: 0x2018, 146: 0x2019, 147: 0x201c, 148: 0x201d, 149: 0x2022,
+        150: 0x2013, 151: 0x2014, 152: 0x02dc, 153: 0x2122, 154: 0x0161, 155: 0x203a,
+        156: 0x0153, 158: 0x017e, 159: 0x0178,
+      };
+
+      /** Numeric entities are arithmetic. No parser, so a million of them cost nothing. */
+      function decodeNumeric(body) {
+        const hex = /^#[xX]([0-9a-fA-F]+)$/.exec(body);
+        const dec = /^#(\d+)$/.exec(body);
+        if (!hex && !dec) return null;
+        const parsed = hex ? parseInt(hex[1], 16) : parseInt(dec[1], 10);
+        const point = Object.hasOwn(C1_REMAP, parsed) ? C1_REMAP[parsed] : parsed;
+        if (!Number.isFinite(point) || point === 0 || point > 0x10ffff) return "\uFFFD";
+        if (point >= 0xd800 && point <= 0xdfff) return "\uFFFD";
+        try {
+          return String.fromCodePoint(point);
+        } catch {
+          return "\uFFFD";
+        }
+      }
 
       /**
-       * Decodes one entity at a time through DOMParser, which knows every named entity
-       * and runs no script. Passing the whole document through it instead would strip
-       * any literal markup the input happened to contain.
+       * Named entities go through DOMParser, which knows all two thousand of them — but
+       * once for the whole document rather than once per entity. Parsing per match cost
+       * ten seconds on a large paste and grew a cache that was never cleared.
        */
-      function decodeEntity(match) {
-        if (entityCache.has(match)) return entityCache.get(match);
-        const parsed = new DOMParser().parseFromString(match, "text/html");
-        const text = parsed.documentElement.textContent;
-        const out = text === match ? match : text;
-        entityCache.set(match, out);
-        return out;
+      function resolveNamed(names) {
+        const resolved = new Map();
+        if (!names.size) return resolved;
+        const SEP = "\u0001";
+        const list = [...names];
+        const doc = new DOMParser().parseFromString(list.map((n) => `&${n};`).join(SEP), "text/html");
+        const parts = (doc.documentElement.textContent || "").split(SEP);
+        list.forEach((name, i) => resolved.set(name, parts[i] === undefined ? `&${name};` : parts[i]));
+        return resolved;
+      }
+
+      function decodeEntities(text) {
+        const names = new Set();
+        for (const match of text.matchAll(ENTITY)) {
+          if (!/^#/.test(match[1])) names.add(match[1]);
+        }
+        const named = resolveNamed(names);
+        return text.replace(ENTITY, (whole, body) => {
+          if (body.startsWith("#")) {
+            const out = decodeNumeric(body);
+            return out === null ? whole : out;
+          }
+          const out = named.get(body);
+          return out === undefined ? whole : out;
+        });
       }
 
       const encodeEntities = (text) =>
@@ -165,8 +215,11 @@
           "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
         })[c]);
 
+      // Says the first bytes match, never that the payload is that file. Four bytes are
+      // not a PNG, and a signature is the beginning of a guess rather than the end of one.
       function describeBytes(bytes) {
         for (const [magic, name] of MAGIC) {
+          if (bytes.length < magic.length + 8) continue;
           if (magic.every((b, i) => bytes[i] === b)) return name;
         }
         return null;
@@ -186,10 +239,25 @@
 
       let lastOutput = "";
       let loadedFile = null;
+      let showedSomething = false;
+      let fileReadToken = 0;
+
+      /** Two dots is not a JWT. Version strings and hostnames have two dots. */
+      function looksLikeJwt(text) {
+        const parts = text.split(".");
+        if (parts.length !== 3) return false;
+        if (!/^eyJ[\w-]{4,}$/.test(parts[0]) || !/^[\w-]+$/.test(parts[1])) return false;
+        try {
+          const header = JSON.parse(new TextDecoder().decode(fromBase64(parts[0])));
+          return !!header && typeof header === "object" && !Array.isArray(header) && "alg" in header;
+        } catch {
+          return false;
+        }
+      }
 
       function analyseDecoded(text, findings) {
         const trimmed = text.trim();
-        if (/^[\w-]+\.[\w-]+\.[\w-]*$/.test(trimmed)) {
+        if (looksLikeJwt(trimmed)) {
           findings.push({
             level: "info",
             headline: "This looks like a JWT",
@@ -219,7 +287,6 @@
         const findings = [];
         const source = els.input.value;
 
-        if (!loadedFile && !source.trim()) return;
 
         let output = "";
         let inputBytes = null;
@@ -247,7 +314,7 @@
                 output = "";
                 findings.push({
                   level: "info",
-                  headline: kind ? `The bytes are ${kind}` : "The bytes are not text",
+                  headline: kind ? `The first bytes match ${kind}` : "The bytes are not text",
                   detail: `${outputBytes.length.toLocaleString()} bytes that are not valid UTF-8, so there is nothing to show as text. First bytes: ${hexPreview(outputBytes)}.`,
                 });
               } else {
@@ -258,11 +325,20 @@
               try {
                 output = decodeURIComponent(source);
               } catch {
-                throw new Error("This is not valid URL escaping — it contains a % that is not followed by two hex digits.");
+                throw new Error(/%(?![0-9a-fA-F]{2})/.test(source)
+                  ? "This is not valid URL escaping — it contains a % that is not followed by two hex digits."
+                  : "The escapes here are well formed, but the bytes they spell are not valid UTF-8, so there is no text to show.");
+              }
+              if (source.includes("+")) {
+                findings.push({
+                  level: "info",
+                  headline: "A plus sign was left as a plus sign",
+                  detail: "in a form-encoded query string a plus means a space, but percent-decoding alone does not treat it that way. If this came from a form body, the pluses are spaces.",
+                });
               }
               analyseDecoded(output, findings);
             } else {
-              output = source.replace(ENTITY, decodeEntity);
+              output = decodeEntities(source);
               analyseDecoded(output, findings);
             }
           }
@@ -270,6 +346,7 @@
           els.results.hidden = true;
           els.output.textContent = "";
           lastOutput = "";
+          showedSomething = true;
           els.status.textContent = err && err.message ? err.message : "That could not be converted.";
           syncButtons();
           return;
@@ -298,12 +375,15 @@
             detail: `${source.length.toLocaleString()} characters take ${inputBytes.length.toLocaleString()} bytes as UTF-8. Encoders that assume one byte per character corrupt text like this.`,
           });
         }
-        if (!findings.length) {
+        if (loadedFile && loadedFile.bytes.length === 0) {
+          findings.push({ level: "info", headline: "That file is empty", detail: "zero bytes, so there is nothing to encode." });
+        } else if (!findings.length) {
           findings.push({ level: "good", headline: direction === "encode" ? "Encoded" : "Decoded", detail: "nothing unusual came up." });
         }
         renderFindings(els.findings, findings);
 
         els.results.hidden = false;
+        showedSomething = true;
         els.status.textContent = `${direction === "encode" ? "Encoded" : "Decoded"} in this page. Nothing was uploaded.`;
         syncButtons();
       }
@@ -318,7 +398,8 @@
       function invalidate() {
         loadedFile = null;
         els.input.readOnly = false;
-        if (!els.results.hidden || els.output.textContent) {
+        if (showedSomething) {
+          showedSomething = false;
           els.results.hidden = true;
           els.output.textContent = "";
           lastOutput = "";
@@ -329,7 +410,10 @@
 
       bindSubmitEnabled(els.input, els.go, invalidate);
       els.format.addEventListener("change", () => {
-        if (els.results.hidden && !els.output.textContent) return;
+        // An error counts as something on screen. It named the previous format, so it is
+        // wrong the moment the format changes.
+        if (!showedSomething) return;
+        showedSomething = false;
         els.results.hidden = true;
         els.output.textContent = "";
         lastOutput = "";
@@ -346,10 +430,17 @@
         els.picker.value = "";
         if (!file) return;
         if (file.size > MAX_FILE) {
-          els.status.textContent = `That file is ${(file.size / 1048576).toFixed(1)} MB. This page stops at 1 MB, because base64 grows the text by a third and a bigger one would lock the tab up.`;
+          els.status.textContent = `That file is ${file.size.toLocaleString()} bytes. This page stops at ${MAX_FILE.toLocaleString()}, because base64 grows the text by a third and a bigger one would lock the tab up.`;
           return;
         }
+        const token = ++fileReadToken;
         const bytes = new Uint8Array(await file.arrayBuffer());
+        if (token !== fileReadToken) return;
+        // Typing during the read cleared the file state; do not overwrite what was typed.
+        if (els.input.value && !els.input.readOnly && els.input.value.trim() !== "") {
+          els.status.textContent = "The file was dropped because the box was edited while it loaded. Clear the box and load it again.";
+          return;
+        }
         loadedFile = { name: file.name, type: file.type, bytes };
         els.input.value = `${file.name} — ${bytes.length.toLocaleString()} bytes loaded. Press Encode.`;
         els.input.readOnly = true;
@@ -362,7 +453,12 @@
       });
 
       els.copy.addEventListener("click", async () => {
-        await navigator.clipboard.writeText(lastOutput);
+        try {
+          await navigator.clipboard.writeText(lastOutput);
+        } catch {
+          els.status.textContent = "This browser would not let the page write to the clipboard. Select the output and copy it.";
+          return;
+        }
         els.copy.textContent = "Copied";
         setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
       });
