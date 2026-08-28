@@ -72,7 +72,7 @@ Note in `.caveats` that a site can serve the agent different content than it ser
 | Tool | Slug | Status | Notes |
 | --- | --- | --- | --- |
 | JSON formatter | `json` | on-portfolio | Two panes. Repairs broken JSON, keeps long numbers exact, warns on duplicate keys |
-| Timestamp converter | `timestamp` | shipped | Epoch ⇄ human, timezone aware |
+| Timestamp converter | `timestamp` | on-portfolio | Epoch ⇄ human, timezone aware |
 | ID generator | `ids` | idea | UUID v4, ULID, nanoid, bulk + copy |
 | Hash generator | `hash` | idea | SHA-1/256/512 via WebCrypto (no MD5 — WebCrypto has none) |
 | Encode/decode bench | `encode` | on-portfolio | Base64, URL, HTML entities. Text and file input |

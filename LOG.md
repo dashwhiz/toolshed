@@ -262,3 +262,43 @@ blurb already mentions the everyday tools, so that repo was not touched.
 
 Next: `timestamp`, then `ids`, then `text`.
 
+## 2026-08-28
+Shipped `timestamp`. Epoch to human and back in any of 418 zones, showing the instant in
+UTC, this device's zone and one you pick. It infers whether a bare number counts seconds,
+milliseconds, microseconds or nanoseconds from its magnitude, because reading a thirteen
+digit value as seconds is how a log line becomes the year 58621 — the same mistake the JWT
+decoder made.
+
+The review returned two Critical, and one of them was mine from an hour earlier. While
+testing I noticed the "same number read the other ways" note firing on `0`, where every
+reading is 1970, so I filtered alternatives to those landing in 1990-2100. That window spans
+a ratio of 6.55 while consecutive units are a thousand apart, so no number can ever have an
+alternative inside it — the reviewer brute-forced 579,942 values and found zero. I had made
+the feature unreachable while leaving `.caveats` promising it, which is exactly the kind of
+claim DESIGN.md forbids. Every valid reading is now shown, which also fixes the case where a
+1970 millisecond value is read as seconds with nothing to flag it.
+
+The other Critical: the offset test `/(?:Z|[+-]\d{2}:?\d{2})$/` matched the tail of a US
+format date, so `08-28-2026` was announced as "a date with an explicit offset" while
+actually being read in this device's zone — the opposite of the truth. Worse, that branch
+suppressed both warnings that would have caught it. An offset is now only trusted on a
+string that is ISO to begin with.
+
+Also fixed: epoch rows were rendered from an unrounded float, so a nanosecond input printed
+`1787755298123.4568` under a heading reading "Epoch milliseconds" and disagreed with the ISO
+row beside it. And `longOffset` emits seconds for historic offsets, which the regex was
+truncating — `Africa/Monrovia` at epoch 0 showed a clock reading 11:15:30 next to an offset
+of `GMT-00:44`, and nineteen real offset changes in the 1880-1960 range were invisible to
+the clock-change check because both sides truncated to the same string.
+
+An impossible date like `2026-02-30` used to roll silently to March 2. It now says so.
+
+Note for future runs: macOS has started dropping connections to newly bound Python
+listeners — the process runs and the port is held, but connecting times out rather than
+being refused. Two ports failed that way this session. The server already running on
+127.0.0.1:8099 serves this repo and works.
+
+`timestamp` is on-portfolio; the portfolio's single Toolshed entry already covers it.
+
+Next: `ids`, then `text`, then `contrast`.
+
