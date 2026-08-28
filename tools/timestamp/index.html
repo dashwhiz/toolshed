@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Timestamp converter — Toolshed</title>
+    <meta
+      name="description"
+      content="Epoch to human and back, in any timezone. Works out whether a number is seconds, milliseconds or nanoseconds instead of guessing wrong."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Timestamp converter</h1>
+      <p class="lede">
+        A number from a log, or a date from anywhere, read back in whichever timezone you
+        need. It works out whether a number counts seconds, milliseconds or nanoseconds
+        rather than assuming and landing you in the wrong millennium.
+      </p>
+
+      <form id="form">
+        <input
+          id="input"
+          type="text"
+          placeholder="1787755298, or 2026-08-28T09:14:00Z"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Timestamp or date to convert"
+        />
+        <button id="go" type="submit">Convert</button>
+      </form>
+
+      <div class="choices">
+        <label for="zone">Timezone</label>
+        <select id="zone"></select>
+        <button id="now" class="secondary" type="button">Use now</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+
+      <p class="note" id="status" role="status" aria-live="polite">
+        Nothing is uploaded. The conversion happens in this page.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <p class="label">What it reads as</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">The instant</p>
+        <dl id="instant"></dl>
+
+        <p class="label">In each zone</p>
+        <dl id="zones"></dl>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>Which unit a bare number was meant to be. The reading is inferred from its size, and the other plausible reading is shown beside it so you can tell them apart yourself.</li>
+          <li>Whether a date written without a timezone meant your zone or somewhere else. JavaScript reads a date on its own as UTC and a date with a time as local, which is a real difference of hours — the reading used is always stated.</li>
+          <li>Epoch time has no leap seconds. Every day in it is exactly 86,400 seconds, so a converted instant can sit a second away from what an atomic clock recorded.</li>
+          <li>Zone offsets come from this device's own database. Historic dates and future political changes are where those disagree between systems.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+
+      const els = {
+        form: document.getElementById("form"),
+        input: document.getElementById("input"),
+        zone: document.getElementById("zone"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        findings: document.getElementById("findings"),
+        instant: document.getElementById("instant"),
+        zones: document.getElementById("zones"),
+        go: document.getElementById("go"),
+        now: document.getElementById("now"),
+        clear: document.getElementById("clear"),
+      };
+
+      const DEVICE_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      // The range a JS Date can represent at all.
+      const MAX_MS = 8.64e15;
+
+      function fillZones() {
+        let names = [];
+        try {
+          names = Intl.supportedValuesOf("timeZone");
+        } catch {
+          names = [];
+        }
+        if (!names.length) names = ["UTC", "Europe/Berlin", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Tokyo"];
+        if (!names.includes("UTC")) names.unshift("UTC");
+        if (!names.includes(DEVICE_ZONE)) names.unshift(DEVICE_ZONE);
+        for (const name of names) {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          els.zone.append(option);
+        }
+        els.zone.value = DEVICE_ZONE;
+      }
+
+      /**
+       * Works out what unit a bare number is counting, from its magnitude. Ten digits is
+       * seconds, thirteen is milliseconds; reading one as the other is how a log line
+       * becomes the year 58621.
+       */
+      const UNITS = [
+        { limit: 1e11, unit: "seconds", toMs: (n) => n * 1000 },
+        { limit: 1e14, unit: "milliseconds", toMs: (n) => n },
+        { limit: 1e17, unit: "microseconds", toMs: (n) => n / 1000 },
+        { limit: Infinity, unit: "nanoseconds", toMs: (n) => n / 1e6 },
+      ];
+
+      function readNumber(value) {
+        const magnitude = Math.abs(value);
+        const chosen = UNITS.find((u) => magnitude < u.limit);
+        const ms = chosen.toMs(value);
+        const alternatives = UNITS
+          .filter((u) => u !== chosen)
+          .map((u) => ({ unit: u.unit, ms: u.toMs(value) }))
+          .filter((a) => Number.isFinite(a.ms) && a.ms !== ms)
+          .filter((a) => {
+            const year = new Date(a.ms).getUTCFullYear();
+            return year >= 1990 && year <= 2100;
+          });
+        return { ms, unit: chosen.unit, alternatives };
+      }
+
+      function parseInput(raw) {
+        const text = raw.trim();
+        if (!text) throw new Error("Type a timestamp or a date.");
+
+        if (/^-?\d+$/.test(text) || /^-?\d+\.\d+$/.test(text)) {
+          const value = Number(text);
+          if (!Number.isFinite(value)) throw new Error("That number is too large to work with.");
+          const read = readNumber(value);
+          if (!Number.isFinite(read.ms) || Math.abs(read.ms) > MAX_MS) {
+            throw new Error("Read as " + read.unit + ", that lands outside the range a date can represent.");
+          }
+          return { ms: read.ms, how: `a number of ${read.unit}`, unit: read.unit, alternatives: read.alternatives, numeric: true };
+        }
+
+        const parsed = Date.parse(text);
+        if (Number.isNaN(parsed)) {
+          throw new Error("That is not a number, and no date could be read out of it. ISO 8601 like 2026-08-28T09:14:00Z is always understood.");
+        }
+
+        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text);
+        const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+        const isoish = /^\d{4}-\d{2}-\d{2}[T ]/.test(text);
+        let how;
+        if (dateOnly) how = "a date with no time, which is read as midnight UTC";
+        else if (hasOffset) how = "a date with an explicit offset";
+        else if (isoish) how = `a date with no offset, which is read in this device's zone (${DEVICE_ZONE})`;
+        else how = "a date string the browser recognised";
+        return { ms: parsed, how, dateOnly, hasOffset, isoish, freeform: !dateOnly && !hasOffset && !isoish, numeric: false };
+      }
+
+      function inZone(date, zone, options) {
+        try {
+          return new Intl.DateTimeFormat(undefined, { ...options, timeZone: zone }).format(date);
+        } catch {
+          return null;
+        }
+      }
+
+      function offsetOf(date, zone) {
+        const formatted = inZone(date, zone, { timeZoneName: "longOffset" });
+        if (!formatted) return null;
+        const match = formatted.match(/GMT[+-]\d{2}:\d{2}|GMT/);
+        return match ? match[0] : null;
+      }
+
+      const HUMAN = { dateStyle: "full", timeStyle: "medium" };
+
+      function relative(ms) {
+        const diff = ms - Date.now();
+        const units = [
+          ["year", 31536000000], ["month", 2592000000], ["day", 86400000],
+          ["hour", 3600000], ["minute", 60000], ["second", 1000],
+        ];
+        const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+        for (const [unit, size] of units) {
+          if (Math.abs(diff) >= size) return formatter.format(Math.round(diff / size), unit);
+        }
+        return formatter.format(0, "second");
+      }
+
+      function isoWeek(date) {
+        const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const day = d.getUTCDay() || 7;
+        d.setUTCDate(d.getUTCDate() + 4 - day);
+        const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        const week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+        return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+      }
+
+      function render(parsed) {
+        const findings = [];
+        const zone = els.zone.value || "UTC";
+        const date = new Date(parsed.ms);
+
+        if (parsed.numeric && parsed.alternatives.length) {
+          const others = parsed.alternatives
+            .map((a) => `${a.unit}: ${new Date(a.ms).toISOString().slice(0, 10)}`)
+            .join("; ");
+          findings.push({
+            level: "warn",
+            headline: "The same number read the other ways",
+            detail: `${others}. Nothing in a bare number says which it is, so check this against where it came from.`,
+          });
+        }
+        if (parsed.isoish && !parsed.hasOffset) {
+          findings.push({
+            level: "warn",
+            headline: "No offset was given",
+            detail: `so it was read in this device's zone, ${DEVICE_ZONE}. Written as a date on its own it would have been read as UTC instead — a difference of hours.`,
+          });
+        }
+        if (parsed.freeform) {
+          findings.push({
+            level: "warn",
+            headline: "That format is not standard",
+            detail: "the browser recognised it, but which date a non-ISO string means is left to each browser to decide, so another one may read it differently.",
+          });
+        }
+
+        // A DST change nearby is worth naming: the wall clock either repeats or skips.
+        const before = offsetOf(new Date(parsed.ms - 43200000), zone);
+        const after = offsetOf(new Date(parsed.ms + 43200000), zone);
+        if (before && after && before !== after) {
+          findings.push({
+            level: "warn",
+            headline: `A clock change happens within a day of this instant in ${zone}`,
+            detail: `the offset moves from ${before} to ${after}, so wall-clock times near here are ambiguous or do not exist.`,
+          });
+        }
+
+        const year = date.getUTCFullYear();
+        if (year < 1900 || year > 2200) {
+          findings.push({
+            level: "warn",
+            headline: `That lands in ${year}`,
+            detail: "far from the present. If that is not what you expected, the unit is the usual reason.",
+          });
+        }
+
+        renderFindings(els.findings, findings);
+
+        els.instant.replaceChildren();
+        const seconds = parsed.ms / 1000;
+        row(els.instant, "Epoch seconds", Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(3), true);
+        row(els.instant, "Epoch milliseconds", String(parsed.ms), true);
+        row(els.instant, "ISO 8601", date.toISOString(), true);
+        row(els.instant, "Relative", relative(parsed.ms));
+        row(els.instant, "ISO week", isoWeek(date), true);
+
+        els.zones.replaceChildren();
+        const seen = new Set();
+        for (const name of ["UTC", DEVICE_ZONE, zone]) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          const human = inZone(date, name, HUMAN);
+          const offset = offsetOf(date, name);
+          const label = name === DEVICE_ZONE && name !== "UTC" ? `${name} (this device)` : name;
+          row(els.zones, label, human ? `${human}${offset ? ` — ${offset}` : ""}` : "this device cannot format that zone");
+        }
+
+        els.results.hidden = false;
+        els.status.textContent = `Read as ${parsed.how}. Converted in this page, nothing was uploaded.`;
+      }
+
+      let lastParsed = null;
+
+      function run() {
+        if (!els.input.value.trim()) return;
+        try {
+          lastParsed = parseInput(els.input.value);
+          render(lastParsed);
+        } catch (err) {
+          lastParsed = null;
+          els.results.hidden = true;
+          els.status.textContent = err && err.message ? err.message : "That could not be converted.";
+        }
+      }
+
+      function invalidate() {
+        lastParsed = null;
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Convert to read this.";
+      }
+
+      fillZones();
+      bindSubmitEnabled(els.input, els.go, invalidate);
+
+      els.form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        run();
+      });
+      // Changing the zone re-reads the same instant. The input has not changed, so the
+      // result still describes exactly what is in the field.
+      els.zone.addEventListener("change", () => {
+        if (lastParsed) render(lastParsed);
+      });
+      els.now.addEventListener("click", () => {
+        els.input.value = String(Math.floor(Date.now() / 1000));
+        els.input.dispatchEvent(new Event("input"));
+        run();
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. The conversion happens in this page.";
+        els.input.focus();
+      });
+    </script>
+  </body>
+</html>
