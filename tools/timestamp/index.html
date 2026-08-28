@@ -45,7 +45,7 @@
       </p>
 
       <div id="results" aria-live="polite" hidden>
-        <p class="label">What it reads as</p>
+        <p class="label">Notes</p>
         <ul class="findings" id="findings"></ul>
 
         <p class="label">The instant</p>
@@ -125,11 +125,7 @@
         const alternatives = UNITS
           .filter((u) => u !== chosen)
           .map((u) => ({ unit: u.unit, ms: u.toMs(value) }))
-          .filter((a) => Number.isFinite(a.ms) && a.ms !== ms)
-          .filter((a) => {
-            const year = new Date(a.ms).getUTCFullYear();
-            return year >= 1990 && year <= 2100;
-          });
+          .filter((a) => Number.isFinite(a.ms) && a.ms !== ms && Math.abs(a.ms) <= MAX_MS);
         return { ms, unit: chosen.unit, alternatives };
       }
 
@@ -144,7 +140,7 @@
           if (!Number.isFinite(read.ms) || Math.abs(read.ms) > MAX_MS) {
             throw new Error("Read as " + read.unit + ", that lands outside the range a date can represent.");
           }
-          return { ms: read.ms, how: `a number of ${read.unit}`, unit: read.unit, alternatives: read.alternatives, numeric: true };
+          return { ms: read.ms, raw: value, how: `a number of ${read.unit}`, unit: read.unit, alternatives: read.alternatives, numeric: true };
         }
 
         const parsed = Date.parse(text);
@@ -152,15 +148,33 @@
           throw new Error("That is not a number, and no date could be read out of it. ISO 8601 like 2026-08-28T09:14:00Z is always understood.");
         }
 
-        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text);
-        const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
-        const isoish = /^\d{4}-\d{2}-\d{2}[T ]/.test(text);
+        // Order matters. An offset can only be trusted on a string that is ISO to begin
+        // with: in a US-format date like 08-28-2026 the trailing "-2026" reads as an
+        // offset of -20:26, which would announce a timezone the string does not carry.
+        const dateOnly = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(text);
+        const isoDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text);
+        const hasOffset = isoDateTime && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+        const freeform = !dateOnly && !isoDateTime;
+
         let how;
         if (dateOnly) how = "a date with no time, which is read as midnight UTC";
         else if (hasOffset) how = "a date with an explicit offset";
-        else if (isoish) how = `a date with no offset, which is read in this device's zone (${DEVICE_ZONE})`;
-        else how = "a date string the browser recognised";
-        return { ms: parsed, how, dateOnly, hasOffset, isoish, freeform: !dateOnly && !hasOffset && !isoish, numeric: false };
+        else if (isoDateTime) how = `a date with no offset, which is read in this device's zone (${DEVICE_ZONE})`;
+        else how = "a date string the browser recognised, in a format no standard defines";
+
+        // Date.parse rolls an impossible day forward instead of refusing it.
+        const typed = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        let rolled = null;
+        if (typed) {
+          const d = new Date(parsed);
+          const [y, m, day] = dateOnly || hasOffset
+            ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()]
+            : [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+          if (y !== +typed[1] || m !== +typed[2] || day !== +typed[3]) {
+            rolled = `${typed[1]}-${typed[2]}-${typed[3]}`;
+          }
+        }
+        return { ms: parsed, how, dateOnly, hasOffset, isoDateTime, freeform, rolled, numeric: false };
       }
 
       function inZone(date, zone, options) {
@@ -174,7 +188,7 @@
       function offsetOf(date, zone) {
         const formatted = inZone(date, zone, { timeZoneName: "longOffset" });
         if (!formatted) return null;
-        const match = formatted.match(/GMT[+-]\d{2}:\d{2}|GMT/);
+        const match = formatted.match(/GMT[+-]\d{2}:\d{2}(?::\d{2})?|GMT/);
         return match ? match[0] : null;
       }
 
@@ -209,15 +223,15 @@
 
         if (parsed.numeric && parsed.alternatives.length) {
           const others = parsed.alternatives
-            .map((a) => `${a.unit}: ${new Date(a.ms).toISOString().slice(0, 10)}`)
+            .map((a) => `as ${a.unit}, ${new Date(a.ms).toISOString().slice(0, 10)}`)
             .join("; ");
           findings.push({
-            level: "warn",
+            level: "info",
             headline: "The same number read the other ways",
-            detail: `${others}. Nothing in a bare number says which it is, so check this against where it came from.`,
+            detail: `${others}. Nothing in a bare number says which unit it counts, so check the reading above against where it came from.`,
           });
         }
-        if (parsed.isoish && !parsed.hasOffset) {
+        if (parsed.isoDateTime && !parsed.hasOffset) {
           findings.push({
             level: "warn",
             headline: "No offset was given",
@@ -228,7 +242,14 @@
           findings.push({
             level: "warn",
             headline: "That format is not standard",
-            detail: "the browser recognised it, but which date a non-ISO string means is left to each browser to decide, so another one may read it differently.",
+            detail: "the browser recognised it, but which date a non-ISO string means is left to each browser to decide, so another one may read it differently — and whether it was read as UTC or as this device's zone is not defined either.",
+          });
+        }
+        if (parsed.rolled) {
+          findings.push({
+            level: "warn",
+            headline: `There is no ${parsed.rolled}`,
+            detail: "that day does not exist in that month, and it was rolled forward into the next one rather than refused.",
           });
         }
 
@@ -238,8 +259,23 @@
         if (before && after && before !== after) {
           findings.push({
             level: "warn",
-            headline: `A clock change happens within a day of this instant in ${zone}`,
+            headline: `A clock change happens within 12 hours of this instant in ${zone}`,
             detail: `the offset moves from ${before} to ${after}, so wall-clock times near here are ambiguous or do not exist.`,
+          });
+        }
+
+        if (parsed.numeric && parsed.ms !== Math.round(parsed.ms)) {
+          findings.push({
+            level: "info",
+            headline: "Finer than milliseconds, rounded",
+            detail: "a date can only hold whole milliseconds, so the digits below that were dropped rather than shown as a rounding artefact.",
+          });
+        }
+        if (parsed.numeric && Math.abs(parsed.raw) > Number.MAX_SAFE_INTEGER) {
+          findings.push({
+            level: "warn",
+            headline: "That number is past the point where arithmetic stays exact",
+            detail: "above 9,007,199,254,740,991 a value cannot be represented precisely, so the last digits may already have shifted before any conversion happened.",
           });
         }
 
@@ -255,12 +291,13 @@
         renderFindings(els.findings, findings);
 
         els.instant.replaceChildren();
-        const seconds = parsed.ms / 1000;
+        const ms = Math.round(parsed.ms);
+        const seconds = ms / 1000;
         row(els.instant, "Epoch seconds", Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(3), true);
-        row(els.instant, "Epoch milliseconds", String(parsed.ms), true);
+        row(els.instant, "Epoch milliseconds", String(ms), true);
         row(els.instant, "ISO 8601", date.toISOString(), true);
-        row(els.instant, "Relative", relative(parsed.ms));
-        row(els.instant, "ISO week", isoWeek(date), true);
+        row(els.instant, "Relative", relative(ms));
+        row(els.instant, "ISO week (UTC)", isoWeek(date), true);
 
         els.zones.replaceChildren();
         const seen = new Set();
