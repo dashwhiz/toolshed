@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ID generator — Toolshed</title>
+    <meta
+      name="description"
+      content="UUID v4 and v7, ULID and nanoid, generated in bulk from the browser's cryptographic random source."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body>
+    <main>
+      <h1>ID generator</h1>
+      <p class="lede">
+        Identifiers drawn from the browser's cryptographic random source, in bulk. The kind
+        of thing it is tempting to ask a chatbot for — but a model writes something that
+        looks like a UUID, and looking random is not the same as being random.
+      </p>
+
+      <div class="choices">
+        <label for="format">Format</label>
+        <select id="format">
+          <option value="uuid4">UUID v4</option>
+          <option value="uuid7">UUID v7, time-ordered</option>
+          <option value="ulid">ULID</option>
+          <option value="nanoid">nanoid</option>
+        </select>
+      </div>
+
+      <form id="form">
+        <input
+          id="count"
+          type="text"
+          inputmode="numeric"
+          value="10"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="How many to generate"
+        />
+        <button id="go" type="submit">Generate</button>
+      </form>
+
+      <div class="actions">
+        <button id="copy" class="secondary" type="button">Copy</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+
+      <p class="note" id="status" role="status" aria-live="polite">
+        Generated in this page from crypto.getRandomValues. Nothing is uploaded.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <p class="label">Notes</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">About this format</p>
+        <dl id="about"></dl>
+
+        <p class="label">Generated</p>
+        <pre class="output" id="output"></pre>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li><strong>Uniqueness is overwhelming odds, not a guarantee.</strong> Nothing here checks a database. Two of these can in principle be the same; the figure below is how many you would have to make before that stops being absurd.</li>
+          <li>Random is not the same as secret. These are fine as identifiers. Using one as an unguessable link is a different job, and a ULID has far less randomness in it than the others.</li>
+          <li>Time-ordered formats carry the moment they were made, in the clear. Anyone holding one knows when it was created, to the millisecond.</li>
+          <li>The randomness comes from this browser. If the browser's generator is weak or the device's entropy is poor, nothing on this page would show it.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+
+      const els = {
+        format: document.getElementById("format"),
+        form: document.getElementById("form"),
+        count: document.getElementById("count"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        findings: document.getElementById("findings"),
+        about: document.getElementById("about"),
+        output: document.getElementById("output"),
+        go: document.getElementById("go"),
+        copy: document.getElementById("copy"),
+        clear: document.getElementById("clear"),
+      };
+
+      const MAX_COUNT = 1000;
+
+      // Both alphabets divide 256 exactly, so masking a random byte picks each character
+      // with equal probability. An alphabet of 62 would need rejection sampling instead.
+      const NANOID_ALPHABET = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+      const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+      const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
+      const hex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+      function uuid4() {
+        if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+        const b = randomBytes(16);
+        b[6] = (b[6] & 0x0f) | 0x40;
+        b[8] = (b[8] & 0x3f) | 0x80;
+        const h = hex(b);
+        return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+      }
+
+      // RFC 9562 and the ULID spec both require a counter for identifiers made inside the
+      // same millisecond. Without one a batch shares a timestamp and has no order at all,
+      // which would make "sorts by creation time" untrue exactly when it is being relied on.
+      let lastMs = 0;
+      let counter = 0;
+
+      function tick() {
+        const now = Date.now();
+        if (now === lastMs) {
+          counter += 1;
+        } else {
+          lastMs = now > lastMs ? now : lastMs;
+          counter = 0;
+        }
+        // 12 bits of counter. Beyond that, borrow from the next millisecond rather than
+        // wrap and emit two identifiers that sort in the wrong order.
+        if (counter > 0xfff) {
+          lastMs += 1;
+          counter = 0;
+        }
+        return { ms: lastMs, seq: counter };
+      }
+
+      function uuid7() {
+        const { ms, seq } = tick();
+        const b = randomBytes(16);
+        const time = BigInt(ms);
+        for (let i = 0; i < 6; i++) {
+          b[i] = Number((time >> BigInt(8 * (5 - i))) & 0xffn);
+        }
+        // Version, then the counter across rand_a's twelve bits.
+        b[6] = 0x70 | ((seq >> 8) & 0x0f);
+        b[7] = seq & 0xff;
+        b[8] = (b[8] & 0x3f) | 0x80;
+        const h = hex(b);
+        return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+      }
+
+      const encodeCrockford = (value, length) => {
+        let out = "";
+        let n = value;
+        for (let i = 0; i < length; i++) {
+          out = CROCKFORD[Number(n & 31n)] + out;
+          n >>= 5n;
+        }
+        return out;
+      };
+
+      let lastUlidRandom = 0n;
+
+      function ulid() {
+        const { ms, seq } = tick();
+        // The ULID spec keeps order inside a millisecond by incrementing the random part.
+        if (seq === 0) {
+          let value = 0n;
+          for (const byte of randomBytes(10)) value = (value << 8n) | BigInt(byte);
+          lastUlidRandom = value;
+        } else {
+          lastUlidRandom += 1n;
+          if (lastUlidRandom >= 1n << 80n) lastUlidRandom = 0n;
+        }
+        return encodeCrockford(BigInt(ms), 10) + encodeCrockford(lastUlidRandom, 16);
+      }
+
+      function nanoid(size = 21) {
+        const bytes = randomBytes(size);
+        let out = "";
+        for (const byte of bytes) out += NANOID_ALPHABET[byte & 63];
+        return out;
+      }
+
+      const FORMATS = {
+        uuid4: {
+          label: "UUID v4",
+          bits: 122,
+          make: () => uuid4(),
+          shape: "36 characters, 32 of them hexadecimal",
+          note: "Six of the 128 bits are fixed to mark the version and variant, leaving 122 random.",
+        },
+        uuid7: {
+          label: "UUID v7",
+          bits: 74,
+          timeOrdered: true,
+          make: () => uuid7(),
+          shape: "36 characters, sorts by creation time",
+          note: "The first 48 bits are the millisecond it was made, which is what makes a run of them sort in order.",
+        },
+        ulid: {
+          label: "ULID",
+          bits: 80,
+          timeOrdered: true,
+          make: () => ulid(),
+          shape: "26 characters, Crockford base32, sorts by creation time",
+          note: "48 bits of timestamp then 80 random. Case-insensitive, and avoids letters that read like digits.",
+        },
+        nanoid: {
+          label: "nanoid",
+          bits: 126,
+          make: () => nanoid(),
+          shape: "21 characters from a 64-character URL-safe alphabet",
+          note: "More randomness than a UUID v4 in fewer characters, because none of the bits are spent on a version marker.",
+        },
+      };
+
+      /** Roughly how many you need before one repeat becomes as likely as not. */
+      function birthdayThreshold(bits) {
+        const n = 1.177 * Math.pow(2, bits / 2);
+        const exponent = Math.floor(Math.log10(n));
+        const mantissa = (n / Math.pow(10, exponent)).toFixed(1);
+        return `${mantissa} × 10^${exponent}`;
+      }
+
+      function parseCount(raw) {
+        const text = raw.trim();
+        if (!/^\d+$/.test(text)) throw new Error("How many? Type a whole number.");
+        const value = Number(text);
+        if (value === 0) throw new Error("Nothing to generate — ask for at least one.");
+        if (value > MAX_COUNT) {
+          throw new Error(`That is more than this page makes at once. The limit is ${MAX_COUNT}.`);
+        }
+        return value;
+      }
+
+      let lastOutput = "";
+
+      function run() {
+        let count;
+        try {
+          count = parseCount(els.count.value);
+        } catch (err) {
+          els.results.hidden = true;
+          lastOutput = "";
+          els.status.textContent = err.message;
+          syncCopy();
+          return;
+        }
+
+        const key = els.format.value;
+        const format = FORMATS[key];
+        const ids = [];
+        for (let i = 0; i < count; i++) ids.push(format.make());
+        const stamped = Date.now();
+
+        lastOutput = ids.join("\n");
+        els.output.textContent = lastOutput;
+
+        const findings = [];
+        if (format.timeOrdered) {
+          findings.push({
+            level: "warn",
+            headline: "These carry the time they were made",
+            detail: `every one of them encodes the moment it was made, around ${new Date(stamped).toISOString()}, readable by anyone who has the identifier. That is the point of a sortable id, and it is also a fact about you that travels with it.`,
+          });
+        }
+        findings.push({
+          level: "info",
+          headline: `${format.bits} bits of randomness each`,
+          detail: `a repeat becomes as likely as not somewhere around ${birthdayThreshold(format.bits)} of them. Nothing here checks that these are unused.`,
+        });
+        if (key === "ulid") {
+          findings.push({
+            level: "info",
+            headline: "A ULID is the least random of these",
+            detail: "80 bits against 122 for a UUID v4. Ample for an identifier, much weaker if you were relying on it being unguessable.",
+          });
+        }
+        renderFindings(els.findings, findings);
+
+        els.about.replaceChildren();
+        row(els.about, "Format", format.label);
+        row(els.about, "Shape", format.shape);
+        row(els.about, "Random bits", String(format.bits), true);
+        row(els.about, "Source", "crypto.getRandomValues, the browser's cryptographic generator");
+        row(els.about, "Notes", format.note);
+
+        els.results.hidden = false;
+        els.status.textContent = `${count} generated in this page. Nothing was uploaded.`;
+        syncCopy();
+      }
+
+      function syncCopy() {
+        els.copy.disabled = !lastOutput;
+      }
+
+      function invalidate() {
+        if (els.results.hidden && !lastOutput) return;
+        els.results.hidden = true;
+        els.output.textContent = "";
+        lastOutput = "";
+        els.status.textContent = "Press Generate.";
+        syncCopy();
+      }
+
+      bindSubmitEnabled(els.count, els.go, invalidate);
+      els.form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        run();
+      });
+      // A different format means different identifiers; what is on screen is no longer it.
+      els.format.addEventListener("change", invalidate);
+      els.copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(lastOutput);
+        } catch {
+          els.status.textContent = "This browser would not let the page write to the clipboard. Select the list and copy it.";
+          return;
+        }
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
+      });
+      els.clear.addEventListener("click", () => {
+        els.count.value = "";
+        els.count.dispatchEvent(new Event("input"));
+        els.output.textContent = "";
+        lastOutput = "";
+        els.results.hidden = true;
+        els.status.textContent = "Generated in this page from crypto.getRandomValues. Nothing is uploaded.";
+        els.count.focus();
+        syncCopy();
+      });
+      syncCopy();
+    </script>
+  </body>
+</html>
