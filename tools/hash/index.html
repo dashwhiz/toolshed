@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hash generator — Toolshed</title>
+    <meta
+      name="description"
+      content="SHA-1, SHA-256 and SHA-512 for text or a file, computed in the browser. Compare against an expected digest without uploading anything."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Hash generator</h1>
+      <p class="lede">
+        SHA-1, SHA-256 and SHA-512, over text or a file you pick. The file never leaves the
+        page, which is the point when you are checking a download you would not upload to a
+        chat window.
+      </p>
+
+      <textarea
+        id="input"
+        spellcheck="false"
+        aria-label="Text to hash"
+        placeholder="Type or paste text, or load a file"
+      ></textarea>
+      <div class="actions">
+        <button id="go" type="button">Hash</button>
+        <button id="file" class="secondary" type="button">Load a file</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <input id="picker" type="file" hidden />
+
+      <form id="compare-form">
+        <input
+          id="expected"
+          type="text"
+          placeholder="Paste an expected digest to compare (optional)"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Expected digest to compare against"
+        />
+        <button id="compare" type="submit" class="secondary">Compare</button>
+      </form>
+
+      <p class="note" id="status" role="status" aria-live="polite">
+        Nothing is uploaded. Hashing happens in this page.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <p class="label">Notes</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Digests</p>
+        <dl id="digests"></dl>
+
+        <p class="label">What was hashed</p>
+        <dl id="about"></dl>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li><strong>A matching hash is not proof of safety.</strong> It proves the bytes match the digest you were given. If that digest came from the same place as the file, both could have been replaced together.</li>
+          <li>SHA-1 is broken for anything security-related. Two different files can be made to share a SHA-1 digest, and this has been done in practice. It is here because old systems still print it, not because it should be trusted.</li>
+          <li>None of these are password hashes. They are built to be fast, which is exactly wrong for a password — that needs bcrypt, scrypt or Argon2, with a salt.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        expected: document.getElementById("expected"),
+        compareForm: document.getElementById("compare-form"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        findings: document.getElementById("findings"),
+        digests: document.getElementById("digests"),
+        about: document.getElementById("about"),
+        go: document.getElementById("go"),
+        compare: document.getElementById("compare"),
+        file: document.getElementById("file"),
+        picker: document.getElementById("picker"),
+        clear: document.getElementById("clear"),
+      };
+
+      const MAX_FILE = 64 * 1024 * 1024;
+      const ALGORITHMS = ["SHA-1", "SHA-256", "SHA-384", "SHA-512"];
+
+      const hex = (buffer) =>
+        [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+      let loadedFile = null;
+      let digests = {};
+      let fileToken = 0;
+
+      async function run() {
+        const bytes = loadedFile ? loadedFile.bytes : new TextEncoder().encode(els.input.value);
+        if (!loadedFile && !els.input.value) return;
+
+        els.go.disabled = true;
+        els.status.textContent = "Hashing…";
+        try {
+          digests = {};
+          for (const algorithm of ALGORITHMS) {
+            digests[algorithm] = hex(await crypto.subtle.digest(algorithm, bytes));
+          }
+        } catch (err) {
+          els.results.hidden = true;
+          els.status.textContent = "This browser refused to hash that — " + (err && err.message ? err.message : "unknown reason") + ". Web Crypto needs a secure context, so an http:// page other than localhost will not work.";
+          syncButtons();
+          return;
+        }
+
+        els.digests.replaceChildren();
+        for (const algorithm of ALGORITHMS) row(els.digests, algorithm, digests[algorithm], true);
+
+        els.about.replaceChildren();
+        if (loadedFile) {
+          row(els.about, "File", loadedFile.name);
+          row(els.about, "Type", loadedFile.type || "not reported by the browser");
+          row(els.about, "Size", `${loadedFile.bytes.length.toLocaleString()} bytes`, true);
+        } else {
+          row(els.about, "Text", `${[...els.input.value].length.toLocaleString()} characters`, true);
+          row(els.about, "Which is", `${bytes.length.toLocaleString()} bytes as UTF-8`, true);
+        }
+
+        renderFindings(els.findings, buildFindings());
+        els.results.hidden = false;
+        els.status.textContent = "Hashed in this page. Nothing was uploaded.";
+        syncButtons();
+      }
+
+      function buildFindings() {
+        const findings = [];
+        findings.push({
+          level: "info",
+          headline: "SHA-1 is here for old systems only",
+          detail: "two different files can be made to share a SHA-1 digest, and that has been demonstrated. Use SHA-256 or better for anything that matters.",
+        });
+        return findings;
+      }
+
+      function compare() {
+        const raw = els.expected.value.trim().toLowerCase().replace(/\s+/g, "");
+        if (!raw) return;
+        if (!Object.keys(digests).length) {
+          els.status.textContent = "Hash something first, then compare.";
+          return;
+        }
+        const cleaned = raw.replace(/^(?:sha-?\d+[:=]?)/i, "");
+        const findings = buildFindings();
+
+        const match = ALGORITHMS.find((a) => digests[a] === cleaned);
+        // Findings sort by severity and a match is `good`, which would put the answer to
+        // the question at the bottom of the list. The status line says it outright.
+        let headline;
+        if (match) {
+          findings.unshift({
+            level: "good",
+            headline: `The ${match} digest matches`,
+            detail: "the bytes here are the bytes that digest was made from. That is all it proves — if the digest came from the same place as the file, both could have been replaced together.",
+          });
+          headline = `The ${match} digest matches.`;
+        } else if (!/^[0-9a-f]+$/.test(cleaned)) {
+          findings.unshift({
+            level: "warn",
+            headline: "That does not look like a digest",
+            detail: "a hex digest is only the characters 0-9 and a-f. Check you pasted the whole thing and nothing else.",
+          });
+          headline = "That does not look like a digest.";
+        } else {
+          const sameLength = ALGORITHMS.find((a) => digests[a].length === cleaned.length);
+          findings.unshift({
+            level: "bad",
+            headline: "No match",
+            detail: sameLength
+              ? `it is the right length for ${sameLength}, but the digest here is different. The bytes are not the same bytes.`
+              : `its length matches none of these algorithms, so it was made with something else — ${cleaned.length} hex characters is ${cleaned.length * 4} bits.`,
+          });
+          headline = "No match.";
+        }
+        renderFindings(els.findings, findings);
+        els.results.hidden = false;
+        els.status.textContent = `${headline} Compared in this page, nothing was uploaded.`;
+      }
+
+      function syncButtons() {
+        els.go.disabled = !loadedFile && !els.input.value;
+        els.compare.disabled = !els.expected.value.trim();
+      }
+
+      function invalidate() {
+        loadedFile = null;
+        els.input.readOnly = false;
+        digests = {};
+        if (!els.results.hidden) {
+          els.results.hidden = true;
+          els.status.textContent = "Press Hash.";
+        }
+        syncButtons();
+      }
+
+      els.input.addEventListener("input", invalidate);
+      els.expected.addEventListener("input", syncButtons);
+      els.go.addEventListener("click", run);
+      els.compareForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        compare();
+      });
+      els.file.addEventListener("click", () => els.picker.click());
+      els.picker.addEventListener("change", async () => {
+        const file = els.picker.files && els.picker.files[0];
+        els.picker.value = "";
+        if (!file) return;
+        if (file.size > MAX_FILE) {
+          els.status.textContent = `That file is ${file.size.toLocaleString()} bytes. This page stops at ${MAX_FILE.toLocaleString()}, because the whole thing has to be held in memory at once.`;
+          return;
+        }
+        const token = ++fileToken;
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        if (token !== fileToken) return;
+        if (els.input.value && !els.input.readOnly) {
+          els.status.textContent = "The file was dropped because the box was edited while it loaded. Clear the box and load it again.";
+          return;
+        }
+        loadedFile = { name: file.name, type: file.type, bytes };
+        els.input.value = `${file.name} — ${bytes.length.toLocaleString()} bytes loaded. Press Hash.`;
+        els.input.readOnly = true;
+        els.results.hidden = true;
+        digests = {};
+        els.status.textContent = "File held in this page only. Press Hash.";
+        syncButtons();
+      });
+      els.clear.addEventListener("click", () => {
+        loadedFile = null;
+        digests = {};
+        els.input.readOnly = false;
+        els.input.value = "";
+        els.expected.value = "";
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. Hashing happens in this page.";
+        els.input.focus();
+        syncButtons();
+      });
+      syncButtons();
+    </script>
+  </body>
+</html>

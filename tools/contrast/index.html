@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Colour contrast — Toolshed</title>
+    <meta
+      name="description"
+      content="WCAG contrast for a pair of colours, and the nearest shade that would pass if it does not."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Colour contrast</h1>
+      <p class="lede">
+        Whether text of one colour can be read on another, by the WCAG measure — and when it
+        cannot, the closest shade to what you chose that would pass.
+      </p>
+
+      <form id="form">
+        <input
+          id="pair"
+          type="text"
+          placeholder="#1f2933 on #ffffff"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Foreground and background colours"
+          value="#7a7a7a on #ffffff"
+        />
+        <button id="go" type="submit">Check</button>
+      </form>
+      <p class="note" id="status" role="status" aria-live="polite">
+        Two colours, foreground first. Hex, rgb() or a CSS colour name.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <div class="verdict" id="verdict"></div>
+
+        <div class="swatch-row">
+          <span class="swatch" id="sample-normal"></span>
+          <span class="swatch" id="sample-large"></span>
+        </div>
+
+        <p class="label">Where it stands</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Measured</p>
+        <dl id="measured"></dl>
+
+        <div id="suggestion-block" hidden>
+          <p class="label">Nearest shade that passes</p>
+          <dl id="suggestion"></dl>
+          <div class="swatch-row">
+            <span class="swatch" id="sample-fixed"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>Whether the text is actually readable. The WCAG ratio is a formula over two colours; it knows nothing about the typeface, the weight, the screen, or the person reading. A thin light face at 4.5:1 can still be hard work.</li>
+          <li>Anything about the newer APCA measure, which models perception more closely and disagrees with this one — particularly on dark backgrounds, where this formula is known to be generous.</li>
+          <li>The suggested shade is the nearest one on a straight lightness path that clears the bar. It is not the nicest colour, and it may not suit the rest of your palette.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+
+      const els = {
+        form: document.getElementById("form"),
+        pair: document.getElementById("pair"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        findings: document.getElementById("findings"),
+        measured: document.getElementById("measured"),
+        suggestionBlock: document.getElementById("suggestion-block"),
+        suggestion: document.getElementById("suggestion"),
+        sampleNormal: document.getElementById("sample-normal"),
+        sampleLarge: document.getElementById("sample-large"),
+        sampleFixed: document.getElementById("sample-fixed"),
+        go: document.getElementById("go"),
+      };
+
+      /** Resolves any CSS colour through the browser, so names and rgb() work too. */
+      const probe = document.createElement("span");
+      function toRgb(text) {
+        const value = text.trim();
+        if (!value) return null;
+        probe.style.color = "";
+        probe.style.color = value;
+        if (!probe.style.color) return null;
+        document.body.append(probe);
+        const computed = getComputedStyle(probe).color;
+        probe.remove();
+        const match = computed.match(/rgba?\(([^)]+)\)/);
+        if (!match) return null;
+        const parts = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+        if (parts.length < 3 || parts.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+        const alpha = parts.length > 3 ? parts[3] : 1;
+        return { r: parts[0], g: parts[1], b: parts[2], a: alpha };
+      }
+
+      const hex = ({ r, g, b }) =>
+        "#" + [r, g, b].map((n) => Math.round(n).toString(16).padStart(2, "0")).join("");
+
+      // WCAG 2.x relative luminance.
+      function luminance({ r, g, b }) {
+        const channel = (v) => {
+          const s = v / 255;
+          return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      }
+
+      function ratio(a, b) {
+        const la = luminance(a);
+        const lb = luminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+      }
+
+      const round = (n) => Math.round(n * 100) / 100;
+
+      // A colour function carries commas and spaces inside its brackets, so the pair
+      // cannot be split on those — match whole colours instead of chopping the string up.
+      const COLOUR_TOKEN =
+        /(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^)]*\)|#[0-9a-fA-F]{3,8}\b|[a-zA-Z]{3,}/g;
+
+      function splitPair(raw) {
+        const text = raw.trim();
+        if (!text) throw new Error("Two colours are needed — try something like #333 on white.");
+        const parts = (text.match(COLOUR_TOKEN) || []).filter((t) => t.toLowerCase() !== "on" && t.toLowerCase() !== "vs");
+        if (parts.length < 2) {
+          throw new Error("Two colours are needed — try something like #333 on white.");
+        }
+        // First and last, so "#333 on #fff" and "#333 #fff" both work.
+        const first = parts[0];
+        const last = parts[parts.length - 1];
+        const fg = toRgb(first);
+        const bg = toRgb(last);
+        if (!fg) throw new Error(`"${first}" is not a colour this browser recognises.`);
+        if (!bg) throw new Error(`"${last}" is not a colour this browser recognises.`);
+        return { fg, bg };
+      }
+
+      /**
+       * Walks the foreground towards black and towards white, and returns whichever
+       * passing shade is fewer steps from where you started.
+       */
+      function nearestPassing(fg, bg, target) {
+        let best = null;
+        for (const towards of [0, 255]) {
+          for (let step = 1; step <= 100; step++) {
+            const t = step / 100;
+            const candidate = {
+              r: fg.r + (towards - fg.r) * t,
+              g: fg.g + (towards - fg.g) * t,
+              b: fg.b + (towards - fg.b) * t,
+            };
+            if (ratio(candidate, bg) >= target) {
+              if (!best || step < best.step) {
+                best = { colour: candidate, step, towards: towards === 0 ? "darker" : "lighter" };
+              }
+              break;
+            }
+          }
+        }
+        return best;
+      }
+
+      function paint(el, fg, bg, label, size) {
+        el.style.color = hex(fg);
+        el.style.background = hex(bg);
+        el.textContent = label;
+        el.style.fontSize = size;
+        el.style.fontWeight = size === "1.5rem" ? "500" : "400";
+      }
+
+      function run() {
+        let pair;
+        try {
+          pair = splitPair(els.pair.value);
+        } catch (err) {
+          els.results.hidden = true;
+          els.status.textContent = err.message;
+          return;
+        }
+
+        const { fg, bg } = pair;
+        const value = ratio(fg, bg);
+        const findings = [];
+
+        if (fg.a < 1 || bg.a < 1) {
+          findings.push({
+            level: "warn",
+            headline: "A colour here is see-through",
+            detail: "the measurement ignores its transparency and treats it as solid, so what you see on a real page will differ.",
+          });
+        }
+
+        const levels = [
+          ["Normal text, AA", 4.5], ["Normal text, AAA", 7],
+          ["Large text, AA", 3], ["Large text, AAA", 4.5],
+          ["Interface elements", 3],
+        ];
+        for (const [label, need] of levels) {
+          findings.push({
+            level: value >= need ? "good" : "bad",
+            headline: `${label} — ${value >= need ? "passes" : "fails"} at ${need}:1`,
+            detail: value >= need
+              ? `${round(value)}:1 clears it.`
+              : `${round(value)}:1, short by ${round(need - value)}.`,
+          });
+        }
+        renderFindings(els.findings, findings);
+
+        els.measured.replaceChildren();
+        row(els.measured, "Contrast ratio", `${round(value)}:1`, true);
+        row(els.measured, "Foreground", hex(fg), true);
+        row(els.measured, "Background", hex(bg), true);
+        row(els.measured, "Relative luminance", `${round(luminance(fg) * 100) / 100} against ${round(luminance(bg) * 100) / 100}`, true);
+        row(els.measured, "Large text means", "18.66px bold, or 24px and up");
+
+        paint(els.sampleNormal, fg, bg, "Normal text at this size", "1rem");
+        paint(els.sampleLarge, fg, bg, "Large text", "1.5rem");
+
+        const passesNormal = value >= 4.5;
+        const fix = passesNormal ? null : nearestPassing(fg, bg, 4.5);
+        els.suggestionBlock.hidden = !fix;
+        if (fix) {
+          els.suggestion.replaceChildren();
+          row(els.suggestion, "Try", hex(fix.colour), true);
+          row(els.suggestion, "Which is", `${fix.step}% ${fix.towards} than what you chose`);
+          row(els.suggestion, "New ratio", `${round(ratio(fix.colour, bg))}:1`, true);
+          paint(els.sampleFixed, fix.colour, bg, "Normal text, adjusted", "1rem");
+        }
+
+        if (value >= 7) {
+          renderVerdict(els.verdict, "good", `${round(value)}:1 — clears every level`,
+            "Passes AAA for normal text, the highest bar WCAG sets. It still says nothing about the typeface.");
+        } else if (value >= 4.5) {
+          renderVerdict(els.verdict, "good", `${round(value)}:1 — passes for normal text`,
+            "Meets AA at any size. AAA would want 7:1.");
+        } else if (value >= 3) {
+          renderVerdict(els.verdict, "warn", `${round(value)}:1 — large text only`,
+            "Enough for text at 24px, or 18.66px bold, and for interface elements. Not enough for body text.");
+        } else {
+          renderVerdict(els.verdict, "bad", `${round(value)}:1 — fails at every size`,
+            "Below 3:1 nothing passes, including large text and interface elements.");
+        }
+
+        els.results.hidden = false;
+        els.status.textContent = `Measured in this page. Nothing was uploaded.`;
+      }
+
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Check.";
+      }
+
+      bindSubmitEnabled(els.pair, els.go, invalidate);
+      els.form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        run();
+      });
+    </script>
+  </body>
+</html>

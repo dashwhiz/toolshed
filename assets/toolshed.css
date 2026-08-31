@@ -248,6 +248,30 @@ select option { background: var(--bg); color: var(--fg); }
   .choices select { width: 100%; }
 }
 
+/* A colour tool has to show the colour. These are samples of the thing being judged,
+   not page surfaces, so they do not count against the one-background rule. */
+.swatch {
+  display: block;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.swatch small { display: block; font-size: 0.8rem; opacity: 0.85; }
+.swatch-row { display: grid; gap: 0.75rem; margin-top: 1rem; }
+@media (min-width: 40rem) { .swatch-row { grid-template-columns: 1fr 1fr; } }
+
+input[type="color"] {
+  width: 3rem;
+  height: 2.4rem;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 .actions button { flex: 0 0 auto; }
 button.secondary { background: none; border: 1px solid var(--line-strong); color: var(--fg); }

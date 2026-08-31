@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Text bench — Toolshed</title>
+    <meta
+      name="description"
+      content="Sort, dedupe, trim, change case and count lines. The shell one-liners you keep rewriting, on a page."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body>
+    <main class="wide">
+      <h1>Text bench</h1>
+      <p class="lede">
+        The things you keep rewriting as a shell one-liner — sort, dedupe, trim, change case,
+        count what is there. Applied in the order listed, so you can see what each one did.
+      </p>
+
+      <div class="choices">
+        <label for="operation">Do</label>
+        <select id="operation">
+          <option value="sort">Sort lines</option>
+          <option value="sort-natural">Sort, numbers in order</option>
+          <option value="sort-length">Sort by length</option>
+          <option value="reverse">Reverse the order</option>
+          <option value="dedupe">Remove duplicate lines</option>
+          <option value="duplicates">Keep only duplicated lines</option>
+          <option value="trim">Trim each line</option>
+          <option value="drop-empty">Drop empty lines</option>
+          <option value="upper">UPPER CASE</option>
+          <option value="lower">lower case</option>
+          <option value="title">Title Case</option>
+          <option value="camel">camelCase</option>
+          <option value="snake">snake_case</option>
+          <option value="kebab">kebab-case</option>
+          <option value="number">Number the lines</option>
+          <option value="shuffle">Shuffle</option>
+        </select>
+        <button id="go" type="button">Apply</button>
+        <button id="copy" class="secondary" type="button">Copy</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+
+      <div class="panes">
+        <div class="pane">
+          <span class="pane-label">In</span>
+          <textarea id="input" spellcheck="false" aria-label="Text to work on"
+            placeholder="Paste lines here"></textarea>
+        </div>
+        <div class="pane">
+          <span class="pane-label">Out</span>
+          <pre class="output" id="output" aria-live="polite"></pre>
+        </div>
+      </div>
+
+      <p class="note" id="status" role="status" aria-live="polite">
+        Nothing is uploaded. The text is worked on in this page.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <p class="label">Notes</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Counted</p>
+        <dl id="stats"></dl>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li>Sorting follows this device's language settings, so accented letters and non-Latin scripts order the way your system orders them. Another machine can disagree, and none of it matches a byte-for-byte sort.</li>
+          <li>Case conversion is mechanical. It does not know that "iOS" or "McDonald" are spelled the way they are, and Title Case will flatten them.</li>
+          <li>Counting characters counts what Unicode calls code points. An emoji built from several joined together counts as more than one, because that is what it is.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { scanText } from "../../assets/scan.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        output: document.getElementById("output"),
+        operation: document.getElementById("operation"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        findings: document.getElementById("findings"),
+        stats: document.getElementById("stats"),
+        go: document.getElementById("go"),
+        copy: document.getElementById("copy"),
+        clear: document.getElementById("clear"),
+      };
+
+      const collator = new Intl.Collator(undefined, { sensitivity: "variant" });
+      const natural = new Intl.Collator(undefined, { numeric: true, sensitivity: "variant" });
+
+      /** Splits a line into words however it was written — spaces, dashes, or camelCase. */
+      const words = (line) =>
+        line
+          .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+          .split(/[^\p{L}\p{N}]+/u)
+          .filter(Boolean);
+
+      const titleCase = (line) =>
+        line.replace(/\p{L}[\p{L}\p{M}']*/gu, (w) => w[0].toLocaleUpperCase() + w.slice(1).toLocaleLowerCase());
+
+      const OPERATIONS = {
+        sort: (lines) => [...lines].sort(collator.compare),
+        "sort-natural": (lines) => [...lines].sort(natural.compare),
+        "sort-length": (lines) => [...lines].sort((a, b) => [...a].length - [...b].length || collator.compare(a, b)),
+        reverse: (lines) => [...lines].reverse(),
+        dedupe: (lines) => [...new Set(lines)],
+        duplicates: (lines) => {
+          const seen = new Set();
+          const twice = new Set();
+          for (const line of lines) (seen.has(line) ? twice : seen).add(line);
+          return [...twice];
+        },
+        trim: (lines) => lines.map((l) => l.trim()),
+        "drop-empty": (lines) => lines.filter((l) => l.trim() !== ""),
+        upper: (lines) => lines.map((l) => l.toLocaleUpperCase()),
+        lower: (lines) => lines.map((l) => l.toLocaleLowerCase()),
+        title: (lines) => lines.map(titleCase),
+        camel: (lines) => lines.map((l) => {
+          const parts = words(l);
+          if (!parts.length) return l;
+          return parts.map((w, i) => (i === 0 ? w.toLocaleLowerCase() : w[0].toLocaleUpperCase() + w.slice(1).toLocaleLowerCase())).join("");
+        }),
+        snake: (lines) => lines.map((l) => words(l).map((w) => w.toLocaleLowerCase()).join("_") || l),
+        kebab: (lines) => lines.map((l) => words(l).map((w) => w.toLocaleLowerCase()).join("-") || l),
+        number: (lines) => {
+          const width = String(lines.length).length;
+          return lines.map((l, i) => `${String(i + 1).padStart(width, " ")}  ${l}`);
+        },
+        shuffle: (lines) => {
+          const out = [...lines];
+          // Fisher-Yates from the cryptographic source, so it is a real shuffle rather
+          // than the sort(() => Math.random() - 0.5) trick, which is measurably biased.
+          for (let i = out.length - 1; i > 0; i--) {
+            const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+            [out[i], out[j]] = [out[j], out[i]];
+          }
+          return out;
+        },
+      };
+
+      let lastOutput = "";
+
+      function run() {
+        const raw = els.input.value;
+        if (!raw.trim()) return;
+
+        // A trailing newline is a line ending, not an empty last line — splitting without
+        // accounting for it invents a blank row that was never in the file.
+        const trailing = /\n$/.test(raw);
+        const lines = raw.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
+        const key = els.operation.value;
+        const out = OPERATIONS[key](lines);
+
+        lastOutput = out.join("\n") + (trailing && out.length ? "\n" : "");
+        els.output.textContent = lastOutput;
+
+        const findings = [];
+        if (out.length !== lines.length) {
+          const removed = lines.length - out.length;
+          findings.push({
+            level: "info",
+            headline: removed > 0 ? `${removed} line${removed === 1 ? "" : "s"} fewer` : `${-removed} more`,
+            detail: `went in with ${lines.length}, came out with ${out.length}.`,
+          });
+        }
+        if (key === "dedupe" || key === "duplicates") {
+          const unique = new Set(lines).size;
+          findings.push({
+            level: "info",
+            headline: `${unique} distinct line${unique === 1 ? "" : "s"}`,
+            detail: "compared exactly, so trailing spaces and a different case count as different lines. Trim first if that is not what you want.",
+          });
+        }
+        if (/^(sort|sort-natural|sort-length)$/.test(key)) {
+          findings.push({
+            level: "info",
+            headline: "Sorted the way this device sorts",
+            detail: "using its language settings, which is not the same as sorting by byte value.",
+          });
+        }
+        const scan = scanText(raw);
+        const notable = scan.groups.filter((g) => g.level === "bad" || g.level === "warn");
+        if (notable.length) {
+          findings.push({
+            level: "warn",
+            headline: `Hidden characters in the input: ${notable.map((g) => g.label).join(", ")}`,
+            detail: "lines that look identical can differ by something invisible, which is enough to stop them deduping.",
+          });
+        }
+        renderFindings(els.findings, findings);
+
+        const chars = [...raw].length;
+        const wordCount = (raw.match(/\S+/g) || []).length;
+        els.stats.replaceChildren();
+        row(els.stats, "Lines in", String(lines.length), true);
+        row(els.stats, "Lines out", String(out.length), true);
+        row(els.stats, "Words", String(wordCount), true);
+        row(els.stats, "Characters", String(chars), true);
+        row(els.stats, "Bytes as UTF-8", String(new TextEncoder().encode(raw).length), true);
+        row(els.stats, "Longest line", String(Math.max(0, ...lines.map((l) => [...l].length))), true);
+
+        els.results.hidden = false;
+        els.status.textContent = `Applied in this page. Nothing was uploaded.`;
+        syncCopy();
+      }
+
+      const syncCopy = () => { els.copy.disabled = !lastOutput; };
+
+      function invalidate() {
+        if (els.results.hidden && !lastOutput) return;
+        els.results.hidden = true;
+        els.output.textContent = "";
+        lastOutput = "";
+        els.status.textContent = "Press Apply.";
+        syncCopy();
+      }
+
+      bindSubmitEnabled(els.input, els.go, invalidate);
+      els.go.addEventListener("click", run);
+      els.operation.addEventListener("change", invalidate);
+      els.copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(lastOutput);
+        } catch {
+          els.status.textContent = "This browser would not let the page write to the clipboard. Select the output and copy it.";
+          return;
+        }
+        els.copy.textContent = "Copied";
+        setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
+      });
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.output.textContent = "";
+        lastOutput = "";
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. The text is worked on in this page.";
+        els.input.focus();
+        syncCopy();
+      });
+      syncCopy();
+    </script>
+  </body>
+</html>

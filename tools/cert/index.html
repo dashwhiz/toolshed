@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Certificate decoder — Toolshed</title>
+    <meta
+      name="description"
+      content="Read a PEM certificate: who it is for, who issued it, when it expires and which names it covers. Decoded in the browser."
+    />
+    <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../../assets/toolshed.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Certificate decoder</h1>
+      <p class="lede">
+        Paste a certificate and read what it says — who it was issued to, by whom, which
+        names it covers and when it stops being valid. Decoded here rather than pasted into
+        someone else's site.
+      </p>
+
+      <textarea
+        id="input"
+        spellcheck="false"
+        aria-label="PEM certificate to decode"
+        placeholder="-----BEGIN CERTIFICATE-----"
+      ></textarea>
+      <div class="actions">
+        <button id="go" type="button">Decode</button>
+        <button id="clear" class="secondary" type="button">Clear</button>
+      </div>
+      <p class="note" id="status" role="status" aria-live="polite">
+        Nothing is uploaded. The certificate is decoded in this page.
+      </p>
+
+      <div id="results" aria-live="polite" hidden>
+        <div class="verdict" id="verdict"></div>
+
+        <p class="label">What stood out</p>
+        <ul class="findings" id="findings"></ul>
+
+        <p class="label">Issued to</p>
+        <dl id="subject"></dl>
+
+        <p class="label">Issued by</p>
+        <dl id="issuer"></dl>
+
+        <p class="label">Details</p>
+        <dl id="details"></dl>
+
+        <div id="names-block" hidden>
+          <p class="label">Names it covers</p>
+          <pre class="output" id="names"></pre>
+        </div>
+      </div>
+
+      <div class="caveats">
+        <strong>What this cannot tell you.</strong>
+        <ul>
+          <li><strong>Whether the certificate is trusted.</strong> Nothing here checks the signature or follows the chain to a root your device trusts. Anyone can make a certificate that says anything; being readable is not being valid.</li>
+          <li>Whether it has been revoked. That needs a live query to the issuer, which this page does not make.</li>
+          <li>Whether it matches the site you are looking at. The names below are what the certificate claims to cover, not what any server actually presented.</li>
+          <li>Dates are compared against this device's clock, which the certificate has no say over.</li>
+        </ul>
+      </div>
+    </main>
+
+    <script type="module">
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+
+      const els = {
+        input: document.getElementById("input"),
+        status: document.getElementById("status"),
+        results: document.getElementById("results"),
+        verdict: document.getElementById("verdict"),
+        findings: document.getElementById("findings"),
+        subject: document.getElementById("subject"),
+        issuer: document.getElementById("issuer"),
+        details: document.getElementById("details"),
+        namesBlock: document.getElementById("names-block"),
+        names: document.getElementById("names"),
+        go: document.getElementById("go"),
+        clear: document.getElementById("clear"),
+      };
+
+      const DAY = 86400000;
+
+      /** Minimal DER reader. Enough for a certificate, and nothing more. */
+      function parseDer(bytes, start = 0, end = bytes.length, depth = 0) {
+        if (depth > 40) throw new Error("the structure is nested more deeply than a certificate should be");
+        const nodes = [];
+        let i = start;
+        while (i < end) {
+          const tagByte = bytes[i];
+          const cls = tagByte >> 6;
+          const constructed = (tagByte & 0x20) !== 0;
+          let tag = tagByte & 0x1f;
+          let j = i + 1;
+          if (tag === 0x1f) {
+            tag = 0;
+            let guard = 0;
+            do {
+              if (j >= end || guard++ > 6) throw new Error("a tag runs off the end");
+              tag = (tag << 7) | (bytes[j] & 0x7f);
+            } while (bytes[j++] & 0x80);
+          }
+          if (j >= end) throw new Error("a length byte is missing");
+          let len = bytes[j++];
+          if (len & 0x80) {
+            const count = len & 0x7f;
+            if (count === 0) throw new Error("indefinite lengths are not used in DER");
+            if (count > 4) throw new Error("a length field is longer than this reader supports");
+            len = 0;
+            for (let k = 0; k < count; k++) {
+              if (j >= end) throw new Error("a length runs off the end");
+              len = (len * 256) + bytes[j++];
+            }
+          }
+          const contentStart = j;
+          const contentEnd = j + len;
+          if (contentEnd > end) throw new Error("a field claims to be longer than the data that follows it");
+          const node = { cls, tag, constructed, contentStart, contentEnd };
+          if (constructed) node.children = parseDer(bytes, contentStart, contentEnd, depth + 1);
+          nodes.push(node);
+          i = contentEnd;
+        }
+        return nodes;
+      }
+
+      let der = new Uint8Array(0);
+      const text = (n) => new TextDecoder("utf-8", { fatal: false }).decode(der.subarray(n.contentStart, n.contentEnd));
+
+      function oid(node) {
+        const first = der[node.contentStart];
+        const parts = [Math.floor(first / 40), first % 40];
+        let value = 0;
+        for (let i = node.contentStart + 1; i < node.contentEnd; i++) {
+          value = value * 128 + (der[i] & 0x7f);
+          if (!(der[i] & 0x80)) { parts.push(value); value = 0; }
+        }
+        return parts.join(".");
+      }
+
+      const hexOf = (node, limit = Infinity) => {
+        const out = [];
+        for (let i = node.contentStart; i < Math.min(node.contentEnd, node.contentStart + limit); i++) {
+          out.push(der[i].toString(16).padStart(2, "0"));
+        }
+        return out.join(":");
+      };
+
+      const ATTRIBUTES = {
+        "2.5.4.3": "Common name", "2.5.4.6": "Country", "2.5.4.7": "Locality",
+        "2.5.4.8": "State", "2.5.4.10": "Organisation", "2.5.4.11": "Unit",
+        "2.5.4.5": "Serial", "1.2.840.113549.1.9.1": "Email",
+      };
+      const SIGNATURES = {
+        "1.2.840.113549.1.1.5": { name: "SHA-1 with RSA", weak: true },
+        "1.2.840.113549.1.1.11": { name: "SHA-256 with RSA" },
+        "1.2.840.113549.1.1.12": { name: "SHA-384 with RSA" },
+        "1.2.840.113549.1.1.13": { name: "SHA-512 with RSA" },
+        "1.2.840.113549.1.1.10": { name: "RSASSA-PSS" },
+        "1.2.840.10045.4.3.2": { name: "SHA-256 with ECDSA" },
+        "1.2.840.10045.4.3.3": { name: "SHA-384 with ECDSA" },
+        "1.2.840.10045.4.3.4": { name: "SHA-512 with ECDSA" },
+        "1.3.101.112": { name: "Ed25519" },
+        "1.2.840.113549.1.1.4": { name: "MD5 with RSA", weak: true },
+      };
+      const KEYS = {
+        "1.2.840.113549.1.1.1": "RSA", "1.2.840.10045.2.1": "Elliptic curve",
+        "1.3.101.112": "Ed25519", "1.3.101.113": "Ed448",
+      };
+      const CURVES = {
+        "1.2.840.10045.3.1.7": "P-256", "1.3.132.0.34": "P-384", "1.3.132.0.35": "P-521",
+      };
+
+      function readName(node) {
+        const out = [];
+        for (const rdn of node.children || []) {
+          for (const atv of rdn.children || []) {
+            const [typeNode, valueNode] = atv.children || [];
+            if (!typeNode || !valueNode) continue;
+            const id = oid(typeNode);
+            out.push({ id, label: ATTRIBUTES[id] || id, value: text(valueNode) });
+          }
+        }
+        return out;
+      }
+
+      function readTime(node) {
+        const raw = text(node).trim();
+        // UTCTime is YYMMDDHHMMSSZ; GeneralizedTime carries the full year.
+        const m = raw.match(/^(\d{2}|\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?Z?$/);
+        if (!m) return null;
+        let year = Number(m[1]);
+        if (m[1].length === 2) year += year < 50 ? 2000 : 1900;
+        return new Date(Date.UTC(year, Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0)));
+      }
+
+      function readSans(node) {
+        const names = [];
+        for (const entry of node.children || []) {
+          if (entry.cls !== 2) continue;
+          if (entry.tag === 2) names.push({ kind: "DNS", value: text(entry) });
+          else if (entry.tag === 1) names.push({ kind: "Email", value: text(entry) });
+          else if (entry.tag === 6) names.push({ kind: "URI", value: text(entry) });
+          else if (entry.tag === 7) {
+            const bytes = der.subarray(entry.contentStart, entry.contentEnd);
+            if (bytes.length === 4) names.push({ kind: "IP", value: [...bytes].join(".") });
+            else if (bytes.length === 16) {
+              const parts = [];
+              for (let i = 0; i < 16; i += 2) parts.push(((bytes[i] << 8) | bytes[i + 1]).toString(16));
+              names.push({ kind: "IP", value: parts.join(":") });
+            }
+          }
+        }
+        return names;
+      }
+
+      function decode(raw) {
+        const blocks = raw.match(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/g);
+        let body;
+        if (blocks) {
+          body = blocks[0].replace(/-----[^-]+-----/g, "");
+        } else if (/-----BEGIN ([A-Z ]+)-----/.test(raw)) {
+          const label = raw.match(/-----BEGIN ([A-Z ]+)-----/)[1];
+          throw new Error(`That is a ${label.toLowerCase()} block, not a certificate. This page reads CERTIFICATE blocks.`);
+        } else {
+          body = raw;
+        }
+        const cleaned = body.replace(/\s+/g, "");
+        if (!cleaned) throw new Error("There is nothing here to decode.");
+        if (/[^A-Za-z0-9+/=]/.test(cleaned)) {
+          throw new Error("This is not base64. Paste the whole PEM block, including the BEGIN and END lines.");
+        }
+        let binary;
+        try {
+          binary = atob(cleaned + "=".repeat((4 - (cleaned.length % 4)) % 4));
+        } catch {
+          throw new Error("The base64 here is not a whole number of groups, so it is incomplete or mistyped.");
+        }
+        der = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+        if (der.length < 16) throw new Error("That is far too short to be a certificate.");
+
+        let top;
+        try {
+          top = parseDer(der);
+        } catch (err) {
+          // The reader's own messages describe DER, which means nothing to someone who
+          // pasted the wrong thing. Say what is actually wrong for them.
+          throw new Error(`This decoded from base64, but it is not a certificate — ${err.message}. Check you copied a whole PEM block.`);
+        }
+        const cert = top[0];
+        if (!cert || !cert.children || cert.children.length < 3) {
+          throw new Error("This decoded, but its shape is not a certificate.");
+        }
+        const tbs = cert.children[0];
+        if (!tbs.children || tbs.children.length < 6) throw new Error("The certificate body is missing fields.");
+
+        // An explicit [0] version tag is optional, so everything after it shifts.
+        let index = 0;
+        let version = 1;
+        if (tbs.children[0].cls === 2 && tbs.children[0].tag === 0) {
+          version = Number(der[tbs.children[0].children[0].contentStart]) + 1;
+          index = 1;
+        }
+        const serial = tbs.children[index];
+        const issuer = readName(tbs.children[index + 2]);
+        const validity = tbs.children[index + 3];
+        const subject = readName(tbs.children[index + 4]);
+        const spki = tbs.children[index + 5];
+
+        const notBefore = readTime(validity.children[0]);
+        const notAfter = readTime(validity.children[1]);
+
+        const keyAlgNode = spki.children[0].children[0];
+        const keyAlg = KEYS[oid(keyAlgNode)] || oid(keyAlgNode);
+        let keyDetail = "";
+        if (keyAlg === "RSA") {
+          try {
+            const bitString = spki.children[1];
+            const inner = parseDer(der, bitString.contentStart + 1, bitString.contentEnd);
+            const modulus = inner[0].children[0];
+            let bits = (modulus.contentEnd - modulus.contentStart) * 8;
+            if (der[modulus.contentStart] === 0) bits -= 8;
+            keyDetail = `${bits}-bit`;
+          } catch { keyDetail = ""; }
+        } else if (keyAlg === "Elliptic curve" && spki.children[0].children[1]) {
+          const curve = oid(spki.children[0].children[1]);
+          keyDetail = CURVES[curve] || curve;
+        }
+
+        const sigOid = oid(cert.children[1].children[0]);
+        const signature = SIGNATURES[sigOid] || { name: sigOid };
+
+        let sans = [];
+        let isCa = false;
+        let hasBasicConstraints = false;
+        const extensionsNode = (tbs.children || []).find((c) => c.cls === 2 && c.tag === 3);
+        if (extensionsNode && extensionsNode.children && extensionsNode.children[0]) {
+          for (const ext of extensionsNode.children[0].children || []) {
+            const idNode = (ext.children || [])[0];
+            if (!idNode) continue;
+            const id = oid(idNode);
+            const valueNode = (ext.children || []).find((c) => c.tag === 4 && c.cls === 0);
+            if (!valueNode) continue;
+            let inner;
+            try { inner = parseDer(der, valueNode.contentStart, valueNode.contentEnd); } catch { continue; }
+            if (id === "2.5.29.17" && inner[0]) sans = readSans(inner[0]);
+            if (id === "2.5.29.19") {
+              hasBasicConstraints = true;
+              const seq = inner[0];
+              const flag = (seq.children || []).find((c) => c.tag === 1);
+              isCa = !!flag && der[flag.contentStart] !== 0;
+            }
+          }
+        }
+
+        return { version, serial, issuer, subject, notBefore, notAfter, keyAlg, keyDetail, signature, sans, isCa, hasBasicConstraints };
+      }
+
+      const nameOf = (parts, id) => (parts.find((p) => p.id === id) || {}).value || null;
+      const fmt = (d) => d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+      function describeGap(ms) {
+        const days = Math.round(Math.abs(ms) / DAY);
+        if (days < 1) return "less than a day";
+        if (days === 1) return "a day";
+        if (days < 60) return `${days} days`;
+        const months = Math.round(days / 30);
+        return months < 24 ? `${months} months` : `${(days / 365).toFixed(1)} years`;
+      }
+
+      function run() {
+        let cert;
+        try {
+          cert = decode(els.input.value);
+        } catch (err) {
+          els.results.hidden = true;
+          els.status.textContent = err && err.message ? err.message : "That could not be decoded.";
+          return;
+        }
+
+        const findings = [];
+        const now = Date.now();
+
+        els.subject.replaceChildren();
+        for (const part of cert.subject) row(els.subject, part.label, part.value, true);
+        if (!cert.subject.length) row(els.subject, "Subject", "empty — this certificate names nobody");
+
+        els.issuer.replaceChildren();
+        for (const part of cert.issuer) row(els.issuer, part.label, part.value, true);
+
+        els.details.replaceChildren();
+        row(els.details, "Version", `v${cert.version}`, true);
+        row(els.details, "Serial", hexOf(cert.serial, 20), true);
+        if (cert.notBefore) row(els.details, "Valid from", fmt(cert.notBefore));
+        if (cert.notAfter) row(els.details, "Valid until", fmt(cert.notAfter));
+        row(els.details, "Public key", [cert.keyAlg, cert.keyDetail].filter(Boolean).join(", "), true);
+        row(els.details, "Signed with", cert.signature.name, true);
+        row(els.details, "Is a CA", cert.hasBasicConstraints ? (cert.isCa ? "yes" : "no") : "not stated");
+
+        els.namesBlock.hidden = cert.sans.length === 0;
+        els.names.textContent = cert.sans.map((s) => `${s.kind}  ${s.value}`).join("\n");
+
+        if (!cert.notAfter) {
+          findings.push({ level: "warn", headline: "The expiry date could not be read", detail: "the validity field is not in a form this page understands." });
+        } else if (cert.notAfter.getTime() < now) {
+          findings.push({ level: "bad", headline: `Expired ${describeGap(cert.notAfter - now)} ago`, detail: `it stopped being valid on ${fmt(cert.notAfter)}, by this device's clock.` });
+        } else if (cert.notAfter.getTime() - now < 14 * DAY) {
+          findings.push({ level: "warn", headline: `Expires in ${describeGap(cert.notAfter - now)}`, detail: "worth renewing before it lapses." });
+        }
+        if (cert.notBefore && cert.notBefore.getTime() > now) {
+          findings.push({ level: "warn", headline: "Not valid yet", detail: `it does not start until ${fmt(cert.notBefore)}.` });
+        }
+        if (cert.signature.weak) {
+          findings.push({ level: "bad", headline: `Signed with ${cert.signature.name}`, detail: "that algorithm is broken — a forged certificate can be made to carry the same signature. No current browser accepts it." });
+        }
+        const subjectCn = nameOf(cert.subject, "2.5.4.3");
+        const issuerCn = nameOf(cert.issuer, "2.5.4.3");
+        const selfSigned = JSON.stringify(cert.subject) === JSON.stringify(cert.issuer);
+        if (selfSigned) {
+          findings.push({ level: "warn", headline: "Self-signed", detail: "the subject and issuer are the same, so nothing outside this certificate vouches for it. Normal for a root or a local development certificate, not for a public site." });
+        }
+        if (cert.keyAlg === "RSA" && cert.keyDetail) {
+          const bits = parseInt(cert.keyDetail, 10);
+          if (bits && bits < 2048) {
+            findings.push({ level: "bad", headline: `${bits}-bit RSA key`, detail: "below 2048 bits is considered too weak, and public certificate authorities stopped issuing these." });
+          }
+        }
+        if (cert.notBefore && cert.notAfter) {
+          const span = cert.notAfter - cert.notBefore;
+          if (span > 398 * DAY && !cert.isCa) {
+            findings.push({ level: "info", headline: `Valid for ${describeGap(span)}`, detail: "longer than the 398 days browsers accept for a public certificate, which suggests this is an internal or self-managed one." });
+          }
+        }
+        if (cert.isCa) {
+          findings.push({ level: "info", headline: "This is a certificate authority", detail: "it can sign other certificates rather than identify a single server." });
+        }
+        findings.push({ level: "info", headline: "The signature was not checked", detail: "nothing here verifies who signed this or follows the chain to a trusted root." });
+        renderFindings(els.findings, findings);
+
+        const expired = cert.notAfter && cert.notAfter.getTime() < now;
+        const notYet = cert.notBefore && cert.notBefore.getTime() > now;
+        if (expired) {
+          renderVerdict(els.verdict, "bad", `Expired ${describeGap(cert.notAfter - now)} ago`,
+            "Past its validity window by this device's clock. Whether it was ever trusted is a separate question this page cannot answer.");
+        } else if (notYet) {
+          renderVerdict(els.verdict, "warn", "Not valid yet",
+            "Its validity window starts in the future, by this device's clock.");
+        } else if (cert.signature.weak) {
+          renderVerdict(els.verdict, "bad", "Signed with a broken algorithm",
+            "The dates are fine, but the signature algorithm is one that can be forged.");
+        } else {
+          renderVerdict(els.verdict, "info", `Within its dates${subjectCn ? ` — issued to ${subjectCn}` : ""}`,
+            `The dates allow it${issuerCn ? `, and it says ${issuerCn} issued it` : ""}. Nothing here checks that claim.`);
+        }
+
+        els.results.hidden = false;
+        els.status.textContent = `Decoded in this page. Nothing was uploaded, and the signature was not checked.`;
+      }
+
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Decode.";
+      }
+
+      bindSubmitEnabled(els.input, els.go, invalidate);
+      els.go.addEventListener("click", run);
+      els.clear.addEventListener("click", () => {
+        els.input.value = "";
+        els.input.dispatchEvent(new Event("input"));
+        els.results.hidden = true;
+        els.status.textContent = "Nothing is uploaded. The certificate is decoded in this page.";
+        els.input.focus();
+      });
+    </script>
+  </body>
+</html>
