@@ -97,11 +97,25 @@ worse than no result. Editing a field after a result invalidates it — pass an 
 callback to `bindSubmitEnabled` that hides the results and says which button to press.
 A result must never describe anything other than what is currently in the field.
 
-A submit button stays disabled while its field is empty — wire it with `bindSubmitEnabled`
-from `assets/toolshed.js`, and call the sync function it returns when an in-flight request
-finishes rather than setting `disabled = false`. Whitespace counts as empty. Pressing a
-button and being told off for leaving the field blank is a worse experience than the button
-plainly not being available.
+Every control is disabled unless pressing it would do something. Pressing a button and being
+told off is a worse experience than the button plainly not being available, and that applies
+to all of them, not only the primary one.
+
+`bindSubmitEnabled(field, button, onEdit, isReady)` handles the submit button. `isReady`
+decides what usable input means — non-blank by default, but a count field wants an integer and
+`hash` wants raw non-empty, because the digest of a space is a real answer. It returns
+`{ sync, setBusy }`; use `setBusy` around a request rather than assigning `disabled`, or the
+field's own input listener will unlatch it on the next keystroke and let a second request
+start.
+
+`bindEnabled(button, canAct)` handles everything else. Copy needs output. Clear needs
+something to clear — which is not the same as a non-empty field: a stale error, a visible
+result and a loaded file are all things to clear, so the condition is the whole page being
+dirty, not the input alone. Buttons that *create* input — Try an example, Use now, Load a
+file — are never disabled.
+
+Keep the state in sync by observing what the condition reads rather than remembering to call
+sync from every handler. That is how these drift.
 
 Safari and iOS paint autofilled fields a fixed pale yellow that `background-color` cannot
 override. The `-webkit-autofill` block in the stylesheet holds the single background with an

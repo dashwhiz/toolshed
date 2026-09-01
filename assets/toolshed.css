@@ -264,7 +264,7 @@ select option { background: var(--bg); color: var(--fg); }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 .actions button { flex: 0 0 auto; }
 button.secondary { background: none; border: 1px solid var(--line-strong); color: var(--fg); }
-button.secondary:hover { border-color: var(--accent); }
+button.secondary:not(:disabled):hover { border-color: var(--accent); }
 @media (max-width: 30rem) { .actions { flex-direction: column; } .actions button { width: 100%; } }
 
 /* Two-pane tools: paste on the left, result on the right. */

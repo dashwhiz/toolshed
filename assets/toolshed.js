@@ -121,16 +121,75 @@ export function countBy(findings, level) {
  * can do with a blank form is nothing — rather than press it and read an error.
  * Returns the sync function, for re-enabling after an in-flight request finishes.
  */
-export function bindSubmitEnabled(field, button, onEdit) {
-  const sync = () => { button.disabled = !field.value.trim(); };
+/**
+ * Ties a submit button to its field.
+ *
+ * `isReady` decides what counts as usable input; the default is "not blank", but a count
+ * field or a domain field can say something stricter, and a tool where whitespace is real
+ * data can say something looser. Hard-coding trim() here is why three tools grew their own
+ * `.disabled` assignments that drifted out of sync.
+ *
+ * `setBusy` latches the button off for the length of a request. Without a latch the input
+ * listener below re-enables it on the next keystroke, which let a second lookup start while
+ * the first was still open.
+ *
+ * @param {HTMLElement} field
+ * @param {HTMLButtonElement} button
+ * @param {() => void} [onEdit] invalidates whatever is currently on screen
+ * @param {(value: string) => boolean} [isReady]
+ * @returns {{ sync: () => void, setBusy: (busy: boolean) => void }}
+ */
+export function bindSubmitEnabled(field, button, onEdit, isReady) {
+  const ready = isReady || ((value) => value.trim() !== "");
+  let busy = false;
+  const sync = () => { button.disabled = busy || !ready(field.value); };
   field.addEventListener("input", () => {
     sync();
-    // Typing never runs the tool — it only invalidates whatever is on screen, so a
-    // result can never describe anything other than the text currently in the field.
     if (onEdit) onEdit();
   });
   sync();
+  return {
+    sync,
+    setBusy(next) { busy = next; sync(); },
+  };
+}
+
+/**
+ * Ties any other control to the question "would pressing this do anything?". Returns the
+ * sync function; call it after every state change — a file loaded, a format switched, a
+ * result invalidated, a request settled.
+ *
+ * @param {HTMLButtonElement} button
+ * @param {() => boolean} canAct
+ * @returns {() => void}
+ */
+export function bindEnabled(button, canAct) {
+  const sync = () => { button.disabled = !canAct(); };
+  sync();
   return sync;
+}
+
+/** Copies text and says so, including when the browser refuses. */
+export async function copyToClipboard(button, text, status, label) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    if (status) {
+      status.textContent = "This browser would not let the page write to the clipboard. Select the text and copy it.";
+    }
+    return false;
+  }
+  button.textContent = "Copied";
+  // Reset early if the button gets disabled in the meantime, so "Copied" is never left
+  // sitting on a control that can no longer be pressed.
+  const reset = () => { button.textContent = label; };
+  const timer = setTimeout(reset, 1500);
+  const observer = new MutationObserver(() => {
+    if (button.disabled) { clearTimeout(timer); reset(); observer.disconnect(); }
+  });
+  observer.observe(button, { attributes: true, attributeFilter: ["disabled"] });
+  setTimeout(() => observer.disconnect(), 1600);
+  return true;
 }
 
 

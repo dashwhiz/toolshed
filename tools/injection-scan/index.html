@@ -62,7 +62,7 @@
     </main>
 
     <script type="module">
-      import { row, renderVerdict, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { row, renderVerdict, renderFindings, bindSubmitEnabled, bindEnabled } from "../../assets/toolshed.js";
       import { scanText } from "../../assets/scan.js";
 
       const els = {
@@ -320,6 +320,21 @@
         els.status.textContent = "Press Scan to check this content.";
       }
 
+
+      // Clear has something to do whenever anything on the page is dirty — not only when
+      // the field has text. A stale error survives the results being hidden, and a loaded
+      // file lives outside the field entirely, so an input-only test would strand both.
+      const RESTING_STATUS = els.status.textContent.trim();
+      const isDirty = () =>
+        els.input.value !== "" ||
+        !els.results.hidden ||
+        els.status.textContent.trim() !== RESTING_STATUS;
+      const syncClear = bindEnabled(els.clear, isDirty);
+      // Watch what isDirty actually reads, rather than remembering to call syncClear
+      // from every handler that could change it — that is how these drift out of sync.
+      els.input.addEventListener("input", syncClear);
+      new MutationObserver(syncClear).observe(els.results, { attributes: true, attributeFilter: ["hidden"] });
+      new MutationObserver(syncClear).observe(els.status, { childList: true, characterData: true, subtree: true });
       bindSubmitEnabled(els.input, els.scan, invalidate);
       els.scan.addEventListener("click", run);
       els.sample.addEventListener("click", () => {

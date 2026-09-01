@@ -149,7 +149,13 @@
         return found;
       }
 
-      const syncEnabled = bindSubmitEnabled(els.input, els.go);
+      function invalidate() {
+        if (els.results.hidden) return;
+        els.results.hidden = true;
+        els.status.textContent = "Press Look up to check this domain.";
+      }
+
+      const submit = bindSubmitEnabled(els.input, els.go, invalidate);
 
       els.form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -158,7 +164,7 @@
           els.status.textContent = "That does not look like a domain. Try example.com.";
           return;
         }
-        els.go.disabled = true;
+        submit.setBusy(true);
         els.status.textContent = `Looking up ${host}…`;
         try {
           const found = await lookup(host);
@@ -167,7 +173,7 @@
         } catch (err) {
           els.status.textContent = "Lookup failed — " + err.message;
         } finally {
-          syncEnabled();
+          submit.setBusy(false);
         }
       });
     </script>

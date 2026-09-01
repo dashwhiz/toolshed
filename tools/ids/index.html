@@ -75,7 +75,7 @@
     </main>
 
     <script type="module">
-      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { row, renderFindings, bindSubmitEnabled, bindEnabled } from "../../assets/toolshed.js";
 
       const els = {
         format: document.getElementById("format"),
@@ -92,6 +92,7 @@
       };
 
       const MAX_COUNT = 1000;
+      const DEFAULT_COUNT = "10";
 
       // Both alphabets divide 256 exactly, so masking a random byte picks each character
       // with equal probability. An alphabet of 62 would need rejection sampling instead.
@@ -300,6 +301,7 @@
 
       function syncCopy() {
         els.copy.disabled = !lastOutput;
+        syncClear();
       }
 
       function invalidate() {
@@ -311,7 +313,19 @@
         syncCopy();
       }
 
-      bindSubmitEnabled(els.count, els.go, invalidate);
+      // A count field is not ready just because it is non-blank — "abc" and "0" were
+      // both accepted and then refused on press.
+      // The field ships with a value, so "dirty" means it differs from that default —
+      // not that it is non-empty.
+      const isDirty = () => els.count.value !== DEFAULT_COUNT || !els.results.hidden || lastOutput !== "";
+      const syncClear = bindEnabled(els.clear, isDirty);
+      els.count.addEventListener("input", syncClear);
+      new MutationObserver(syncClear).observe(els.results, { attributes: true, attributeFilter: ["hidden"] });
+
+      bindSubmitEnabled(els.count, els.go, invalidate, (v) => {
+        const text = v.trim();
+        return /^\d+$/.test(text) && Number(text) >= 1 && Number(text) <= MAX_COUNT;
+      });
       els.form.addEventListener("submit", (event) => {
         event.preventDefault();
         run();
@@ -329,7 +343,9 @@
         setTimeout(() => { els.copy.textContent = "Copy"; }, 1500);
       });
       els.clear.addEventListener("click", () => {
-        els.count.value = "";
+        // Restore the default rather than blank it: this field ships with a value, so
+        // emptying it would leave the tool unusable rather than reset.
+        els.count.value = DEFAULT_COUNT;
         els.count.dispatchEvent(new Event("input"));
         els.output.textContent = "";
         lastOutput = "";
