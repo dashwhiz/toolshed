@@ -62,6 +62,7 @@
           <li>Whether it has been revoked. That needs a live query to the issuer, which this page does not make.</li>
           <li>Whether it matches the site you are looking at. The names below are what the certificate claims to cover, not what any server actually presented.</li>
           <li>Dates are compared against this device's clock, which the certificate has no say over.</li>
+          <li>Only the first certificate of a pasted chain is read, only DNS, email, URI and IP names are shown, and a serial longer than 20 bytes is cut short — each of those is stated on the page when it happens.</li>
         </ul>
       </div>
     </main>
@@ -132,14 +133,24 @@
       const text = (n) => new TextDecoder("utf-8", { fatal: false }).decode(der.subarray(n.contentStart, n.contentEnd));
 
       function oid(node) {
+        if (node.contentEnd <= node.contentStart) return "";
         const first = der[node.contentStart];
         const parts = [Math.floor(first / 40), first % 40];
-        let value = 0;
+        let value = 0n;
         for (let i = node.contentStart + 1; i < node.contentEnd; i++) {
-          value = value * 128 + (der[i] & 0x7f);
-          if (!(der[i] & 0x80)) { parts.push(value); value = 0; }
+          value = value * 128n + BigInt(der[i] & 0x7f);
+          if (!(der[i] & 0x80)) { parts.push(value.toString()); value = 0n; }
         }
         return parts.join(".");
+      }
+
+      /** Reads a small unsigned INTEGER, or -1 when it is absent or too large to matter. */
+      function readInteger(node) {
+        if (node.contentEnd <= node.contentStart) return -1;
+        if (node.contentEnd - node.contentStart > 4) return -1;
+        let value = 0;
+        for (let i = node.contentStart; i < node.contentEnd; i++) value = value * 256 + der[i];
+        return value;
       }
 
       const hexOf = (node, limit = Infinity) => {
@@ -188,20 +199,54 @@
         return out;
       }
 
+      // 23 is UTCTime, 24 is GeneralizedTime.
+      const UTC_TIME = 23;
+
+      /**
+       * Decides the year width from the ASN.1 tag rather than from an ordered regex
+       * alternation. Trying a two-digit year first split a twelve-digit GeneralizedTime
+       * on the wrong boundary, and Date.UTC then normalised the impossible month into a
+       * plausible-looking date instead of refusing it — so a certificate that expired in
+       * 1998 read as valid until 2027.
+       */
       function readTime(node) {
-        const raw = text(node).trim();
-        // UTCTime is YYMMDDHHMMSSZ; GeneralizedTime carries the full year.
-        const m = raw.match(/^(\d{2}|\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?Z?$/);
-        if (!m) return null;
-        let year = Number(m[1]);
-        if (m[1].length === 2) year += year < 50 ? 2000 : 1900;
-        return new Date(Date.UTC(year, Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0)));
+        const raw = text(node).trim().replace(/Z$/i, "");
+        if (!/^\d+$/.test(raw)) return null;
+        const yearLength = node.tag === UTC_TIME ? 2 : 4;
+        // year + MMDDHHMM is 8 digits after the year; seconds add 2 more, and are optional
+        // in BER. So UTCTime is 10 or 12 digits and GeneralizedTime is 12 or 14.
+        if (raw.length !== yearLength + 8 && raw.length !== yearLength + 10) return null;
+
+        const part = (start, len) => Number(raw.slice(start, start + len));
+        let year = part(0, yearLength);
+        if (yearLength === 2) year += year < 50 ? 2000 : 1900;
+        const month = part(yearLength, 2);
+        const day = part(yearLength + 2, 2);
+        const hour = part(yearLength + 4, 2);
+        const minute = part(yearLength + 6, 2);
+        const second = raw.length === yearLength + 10 ? part(yearLength + 8, 2) : 0;
+
+        const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+        if (Number.isNaN(date.getTime())) return null;
+        // Date.UTC rolls an impossible month or day forward. Refuse rather than invent.
+        if (
+          date.getUTCFullYear() !== year ||
+          date.getUTCMonth() !== month - 1 ||
+          date.getUTCDate() !== day ||
+          date.getUTCHours() !== hour ||
+          date.getUTCMinutes() !== minute ||
+          date.getUTCSeconds() !== second
+        ) {
+          return null;
+        }
+        return date;
       }
 
       function readSans(node) {
         const names = [];
+        let skipped = 0;
         for (const entry of node.children || []) {
-          if (entry.cls !== 2) continue;
+          if (entry.cls !== 2) { skipped++; continue; }
           if (entry.tag === 2) names.push({ kind: "DNS", value: text(entry) });
           else if (entry.tag === 1) names.push({ kind: "Email", value: text(entry) });
           else if (entry.tag === 6) names.push({ kind: "URI", value: text(entry) });
@@ -212,15 +257,21 @@
               const parts = [];
               for (let i = 0; i < 16; i += 2) parts.push(((bytes[i] << 8) | bytes[i + 1]).toString(16));
               names.push({ kind: "IP", value: parts.join(":") });
-            }
-          }
+            } else skipped++;
+          } else skipped++;
         }
-        return names;
+        return { names, skipped };
       }
 
       function decode(raw) {
         const blocks = raw.match(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/g);
         let body;
+        let blockCount = blocks ? blocks.length : 0;
+        // I1: an unterminated block used to fall through and report itself as the wrong
+        // kind of block, which reads as nonsense.
+        if (!blocks && /-----BEGIN CERTIFICATE-----/.test(raw)) {
+          throw new Error("That certificate block has no END line, so it is incomplete. Copy the whole block including the last line.");
+        }
         if (blocks) {
           body = blocks[0].replace(/-----[^-]+-----/g, "");
         } else if (/-----BEGIN ([A-Z ]+)-----/.test(raw)) {
@@ -256,14 +307,20 @@
           throw new Error("This decoded, but its shape is not a certificate.");
         }
         const tbs = cert.children[0];
-        if (!tbs.children || tbs.children.length < 6) throw new Error("The certificate body is missing fields.");
+        if (!tbs.children) throw new Error("The certificate body is not a structure this reader can walk.");
 
         // An explicit [0] version tag is optional, so everything after it shifts.
         let index = 0;
         let version = 1;
-        if (tbs.children[0].cls === 2 && tbs.children[0].tag === 0) {
-          version = Number(der[tbs.children[0].children[0].contentStart]) + 1;
+        const first = tbs.children[0];
+        if (first && first.cls === 2 && first.tag === 0) {
+          const versionNode = (first.children || [])[0];
+          version = versionNode ? readInteger(versionNode) + 1 : 1;
           index = 1;
+        }
+        // The guard has to account for the shift, or the reads below run off the end.
+        if (tbs.children.length < index + 6) {
+          throw new Error("The certificate body is missing fields — it has fewer than a certificate needs.");
         }
         const serial = tbs.children[index];
         const issuer = readName(tbs.children[index + 2]);
@@ -271,9 +328,15 @@
         const subject = readName(tbs.children[index + 4]);
         const spki = tbs.children[index + 5];
 
+        if (!validity.children || validity.children.length < 2) {
+          throw new Error("The validity field does not hold two dates.");
+        }
         const notBefore = readTime(validity.children[0]);
         const notAfter = readTime(validity.children[1]);
 
+        if (!spki.children || !spki.children[0] || !spki.children[0].children || !spki.children[0].children[0]) {
+          throw new Error("The public key field is not shaped like a public key.");
+        }
         const keyAlgNode = spki.children[0].children[0];
         const keyAlg = KEYS[oid(keyAlgNode)] || oid(keyAlgNode);
         let keyDetail = "";
@@ -291,33 +354,52 @@
           keyDetail = CURVES[curve] || curve;
         }
 
-        const sigOid = oid(cert.children[1].children[0]);
+        const outerAlgNode = (cert.children[1].children || [])[0];
+        if (!outerAlgNode) throw new Error("The signature algorithm field is missing.");
+        const sigOid = oid(outerAlgNode);
         const signature = SIGNATURES[sigOid] || { name: sigOid };
+        // RFC 5280 requires the algorithm inside the body to match the one outside it.
+        const innerAlgNode = ((tbs.children[index + 1] || {}).children || [])[0];
+        const innerOid = innerAlgNode ? oid(innerAlgNode) : null;
+        const algorithmsDisagree = !!innerOid && innerOid !== sigOid;
+        const innerSignature = innerOid ? (SIGNATURES[innerOid] || { name: innerOid }) : null;
 
         let sans = [];
+        let skippedSans = 0;
         let isCa = false;
         let hasBasicConstraints = false;
+        const duplicateExtensions = [];
+        const seenExtensions = new Set();
         const extensionsNode = (tbs.children || []).find((c) => c.cls === 2 && c.tag === 3);
         if (extensionsNode && extensionsNode.children && extensionsNode.children[0]) {
           for (const ext of extensionsNode.children[0].children || []) {
             const idNode = (ext.children || [])[0];
             if (!idNode) continue;
             const id = oid(idNode);
+            // RFC 5280 forbids a repeat precisely because parsers disagree about which
+            // wins. Record it rather than quietly picking one.
+            if (seenExtensions.has(id)) { duplicateExtensions.push(id); continue; }
+            seenExtensions.add(id);
             const valueNode = (ext.children || []).find((c) => c.tag === 4 && c.cls === 0);
             if (!valueNode) continue;
             let inner;
             try { inner = parseDer(der, valueNode.contentStart, valueNode.contentEnd); } catch { continue; }
-            if (id === "2.5.29.17" && inner[0]) sans = readSans(inner[0]);
+            if (id === "2.5.29.17" && inner[0]) {
+              const read = readSans(inner[0]);
+              sans = read.names;
+              skippedSans = read.skipped;
+            }
             if (id === "2.5.29.19") {
               hasBasicConstraints = true;
               const seq = inner[0];
-              const flag = (seq.children || []).find((c) => c.tag === 1);
-              isCa = !!flag && der[flag.contentStart] !== 0;
+              // Universal class only — a context-class [1] tag would otherwise match first.
+              const flag = ((seq && seq.children) || []).find((c) => c.cls === 0 && c.tag === 1);
+              isCa = !!flag && flag.contentEnd > flag.contentStart && der[flag.contentStart] !== 0;
             }
           }
         }
 
-        return { version, serial, issuer, subject, notBefore, notAfter, keyAlg, keyDetail, signature, sans, isCa, hasBasicConstraints };
+        return { version, serial, issuer, subject, notBefore, notAfter, keyAlg, keyDetail, signature, sans, skippedSans, isCa, hasBasicConstraints, blockCount, duplicateExtensions, algorithmsDisagree, innerSignature, serialTruncated: (serial.contentEnd - serial.contentStart) > 20 };
       }
 
       const nameOf = (parts, id) => (parts.find((p) => p.id === id) || {}).value || null;
@@ -338,6 +420,7 @@
           cert = decode(els.input.value);
         } catch (err) {
           els.results.hidden = true;
+          showedSomething = true;
           els.status.textContent = err && err.message ? err.message : "That could not be decoded.";
           return;
         }
@@ -345,24 +428,73 @@
         const findings = [];
         const now = Date.now();
 
-        els.subject.replaceChildren();
-        for (const part of cert.subject) row(els.subject, part.label, part.value, true);
-        if (!cert.subject.length) row(els.subject, "Subject", "empty — this certificate names nobody");
-
-        els.issuer.replaceChildren();
-        for (const part of cert.issuer) row(els.issuer, part.label, part.value, true);
+        const MAX_ROWS = 30;
+        const fillName = (target, parts, emptyText) => {
+          target.replaceChildren();
+          for (const part of parts.slice(0, MAX_ROWS)) row(target, part.label, part.value, true);
+          if (parts.length > MAX_ROWS) {
+            row(target, "and more", `${parts.length - MAX_ROWS} further attributes, not listed`);
+          }
+          if (!parts.length) row(target, "Name", emptyText);
+        };
+        fillName(els.subject, cert.subject,
+          cert.sans.length
+            ? "empty — this certificate identifies itself only by the names below"
+            : "empty — this certificate names nobody");
+        fillName(els.issuer, cert.issuer, "empty — this certificate does not say who issued it");
 
         els.details.replaceChildren();
         row(els.details, "Version", `v${cert.version}`, true);
-        row(els.details, "Serial", hexOf(cert.serial, 20), true);
+        row(els.details, "Serial", hexOf(cert.serial, 20) + (cert.serialTruncated ? ` … (${cert.serial.contentEnd - cert.serial.contentStart} bytes in total)` : ""), true);
         if (cert.notBefore) row(els.details, "Valid from", fmt(cert.notBefore));
         if (cert.notAfter) row(els.details, "Valid until", fmt(cert.notAfter));
         row(els.details, "Public key", [cert.keyAlg, cert.keyDetail].filter(Boolean).join(", "), true);
         row(els.details, "Signed with", cert.signature.name, true);
         row(els.details, "Is a CA", cert.hasBasicConstraints ? (cert.isCa ? "yes" : "no") : "not stated");
 
-        els.namesBlock.hidden = cert.sans.length === 0;
-        els.names.textContent = cert.sans.map((s) => `${s.kind}  ${s.value}`).join("\n");
+        els.namesBlock.hidden = cert.sans.length === 0 && cert.skippedSans === 0;
+        els.names.textContent = cert.sans.map((s) => `${s.kind}  ${s.value}`).join("\n")
+          || "none of the name types this page reads";
+
+        if (cert.blockCount > 1) {
+          findings.push({
+            level: "info",
+            headline: `${cert.blockCount} certificates were pasted`,
+            detail: "only the first is shown. A chain is normal to paste, but the ones above it are not read here.",
+          });
+        }
+        if (cert.skippedSans) {
+          findings.push({
+            level: "warn",
+            headline: `${cert.skippedSans} name${cert.skippedSans === 1 ? " was" : "s were"} not read`,
+            detail: "this page reads DNS names, email addresses, URIs and IP addresses. Other kinds are in the certificate but not shown here, so the list below is not the whole set.",
+          });
+        }
+        if (cert.duplicateExtensions.length) {
+          findings.push({
+            level: "bad",
+            headline: "The same extension appears more than once",
+            detail: `${[...new Set(cert.duplicateExtensions)].join(", ")}. That is forbidden precisely because parsers disagree about which one wins, so two programs can read this certificate differently. Only the first was used here.`,
+          });
+        }
+        if (cert.algorithmsDisagree) {
+          findings.push({
+            level: "bad",
+            headline: "The signature algorithm is stated twice and the two disagree",
+            detail: `the body says ${cert.innerSignature.name} and the outer field says ${cert.signature.name}. They are required to match, and a mismatch is a known way to confuse a verifier.`,
+          });
+        }
+
+        // The repo ships a whole tool for this trick; the decoder should not fall for it.
+        const suspicious = [...cert.subject, ...cert.issuer]
+          .filter((part) => /[\u202A-\u202E\u2066-\u2069\u200E\u200F\n\r\t]/.test(part.value));
+        if (suspicious.length) {
+          findings.push({
+            level: "bad",
+            headline: "A name contains characters that change how it reads",
+            detail: "direction overrides or line breaks are embedded in the subject or issuer, so what appears on screen can be a different string from what the certificate actually contains. Read the bytes, not the rendering.",
+          });
+        }
 
         if (!cert.notAfter) {
           findings.push({ level: "warn", headline: "The expiry date could not be read", detail: "the validity field is not in a form this page understands." });
@@ -381,7 +513,7 @@
         const issuerCn = nameOf(cert.issuer, "2.5.4.3");
         const selfSigned = JSON.stringify(cert.subject) === JSON.stringify(cert.issuer);
         if (selfSigned) {
-          findings.push({ level: "warn", headline: "Self-signed", detail: "the subject and issuer are the same, so nothing outside this certificate vouches for it. Normal for a root or a local development certificate, not for a public site." });
+          findings.push({ level: "warn", headline: "The subject and issuer names are identical", detail: "which usually means it signed itself, so nothing outside it vouches for it — but this page does not check signatures, and a cross-signed certificate looks the same. Normal for a root or a local development certificate, not for a public site." });
         }
         if (cert.keyAlg === "RSA" && cert.keyDetail) {
           const bits = parseInt(cert.keyDetail, 10);
@@ -412,17 +544,27 @@
         } else if (cert.signature.weak) {
           renderVerdict(els.verdict, "bad", "Signed with a broken algorithm",
             "The dates are fine, but the signature algorithm is one that can be forged.");
+        } else if (cert.algorithmsDisagree) {
+          renderVerdict(els.verdict, "bad", "The certificate disagrees with itself about how it was signed",
+            "The algorithm named inside the body is not the one named outside it. They are required to match.");
+        } else if (!cert.notAfter) {
+          renderVerdict(els.verdict, "warn", "The dates could not be read",
+            "The validity field is not in a form this page understands, so whether it is in date is unknown — not confirmed.");
         } else {
           renderVerdict(els.verdict, "info", `Within its dates${subjectCn ? ` — issued to ${subjectCn}` : ""}`,
             `The dates allow it${issuerCn ? `, and it says ${issuerCn} issued it` : ""}. Nothing here checks that claim.`);
         }
 
         els.results.hidden = false;
+        showedSomething = true;
         els.status.textContent = `Decoded in this page. Nothing was uploaded, and the signature was not checked.`;
       }
 
+      let showedSomething = false;
       function invalidate() {
-        if (els.results.hidden) return;
+        // An error counts as something on screen: it describes the previous paste.
+        if (!showedSomething) return;
+        showedSomething = false;
         els.results.hidden = true;
         els.status.textContent = "Press Decode.";
       }

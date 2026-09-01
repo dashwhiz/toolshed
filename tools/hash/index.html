@@ -6,7 +6,7 @@
     <title>Hash generator — Toolshed</title>
     <meta
       name="description"
-      content="SHA-1, SHA-256 and SHA-512 for text or a file, computed in the browser. Compare against an expected digest without uploading anything."
+      content="SHA-1, SHA-256, SHA-384 and SHA-512 for text or a file, computed in the browser. Compare against an expected digest without uploading anything."
     />
     <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="../../assets/toolshed.css" />
@@ -15,7 +15,7 @@
     <main>
       <h1>Hash generator</h1>
       <p class="lede">
-        SHA-1, SHA-256 and SHA-512, over text or a file you pick. The file never leaves the
+        SHA-1, SHA-256, SHA-384 and SHA-512, over text or a file you pick. The file never leaves the
         page, which is the point when you are checking a download you would not upload to a
         chat window.
       </p>
@@ -72,7 +72,7 @@
     </main>
 
     <script type="module">
-      import { row, renderFindings, bindSubmitEnabled } from "../../assets/toolshed.js";
+      import { row, renderFindings } from "../../assets/toolshed.js";
 
       const els = {
         input: document.getElementById("input"),
@@ -99,12 +99,14 @@
       let loadedFile = null;
       let digests = {};
       let fileToken = 0;
+      let comparedAgainst = null;
 
       async function run() {
         const bytes = loadedFile ? loadedFile.bytes : new TextEncoder().encode(els.input.value);
         if (!loadedFile && !els.input.value) return;
 
         els.go.disabled = true;
+        els.compare.disabled = true;
         els.status.textContent = "Hashing…";
         try {
           digests = {};
@@ -148,13 +150,23 @@
       }
 
       function compare() {
-        const raw = els.expected.value.trim().toLowerCase().replace(/\s+/g, "");
-        if (!raw) return;
+        const typed = els.expected.value.trim();
+        if (!typed) return;
         if (!Object.keys(digests).length) {
           els.status.textContent = "Hash something first, then compare.";
           return;
         }
-        const cleaned = raw.replace(/^(?:sha-?\d+[:=]?)/i, "");
+        // Strip the label BEFORE collapsing whitespace, and bound the digit run. A greedy
+        // \d+ applied to the collapsed string ran on past "SHA-256" into the digest and
+        // ate its leading digits, so a correct digest came back as "No match".
+        let cleaned = typed
+          .toLowerCase()
+          .replace(/^sha-?(?:1|224|256|384|512)\b[\s:=]*/i, "")
+          .trim();
+        // A line from SHASUMS256.txt is "<digest>  filename".
+        const firstToken = cleaned.split(/\s+/)[0];
+        if (/^[0-9a-f]{32,128}$/.test(firstToken)) cleaned = firstToken;
+        else cleaned = cleaned.replace(/\s+/g, "");
         const findings = buildFindings();
 
         const match = ALGORITHMS.find((a) => digests[a] === cleaned);
@@ -181,17 +193,20 @@
             level: "bad",
             headline: "No match",
             detail: sameLength
-              ? `it is the right length for ${sameLength}, but the digest here is different. The bytes are not the same bytes.`
+              ? `it is the right length for ${sameLength}, but it does not match the ${sameLength} digest here. Other algorithms produce digests of that length too — SHA3-256 and BLAKE2s-256 are also 64 characters — and this page cannot check those.`
               : `its length matches none of these algorithms, so it was made with something else — ${cleaned.length} hex characters is ${cleaned.length * 4} bits.`,
           });
           headline = "No match.";
         }
         renderFindings(els.findings, findings);
         els.results.hidden = false;
+        comparedAgainst = typed;
         els.status.textContent = `${headline} Compared in this page, nothing was uploaded.`;
       }
 
       function syncButtons() {
+        // Deliberately not bindSubmitEnabled: whitespace is meaningful here. The digest of
+        // a single space is a real answer, and refusing to compute it would be wrong.
         els.go.disabled = !loadedFile && !els.input.value;
         els.compare.disabled = !els.expected.value.trim();
       }
@@ -208,7 +223,15 @@
       }
 
       els.input.addEventListener("input", invalidate);
-      els.expected.addEventListener("input", syncButtons);
+      els.expected.addEventListener("input", () => {
+        syncButtons();
+        // A comparison describes the digest that was in this field when it ran.
+        if (comparedAgainst !== null && els.expected.value.trim() !== comparedAgainst) {
+          comparedAgainst = null;
+          renderFindings(els.findings, buildFindings());
+          els.status.textContent = "Press Compare to check this digest.";
+        }
+      });
       els.go.addEventListener("click", run);
       els.compareForm.addEventListener("submit", (event) => {
         event.preventDefault();

@@ -258,19 +258,8 @@ select option { background: var(--bg); color: var(--fg); }
   font-size: 1rem;
   line-height: 1.5;
 }
-.swatch small { display: block; font-size: 0.8rem; opacity: 0.85; }
 .swatch-row { display: grid; gap: 0.75rem; margin-top: 1rem; }
 @media (min-width: 40rem) { .swatch-row { grid-template-columns: 1fr 1fr; } }
-
-input[type="color"] {
-  width: 3rem;
-  height: 2.4rem;
-  padding: 0;
-  background: none;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  cursor: pointer;
-}
 
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 .actions button { flex: 0 0 auto; }
@@ -310,6 +299,7 @@ button.secondary:hover { border-color: var(--accent); }
 /* Read-only output people copy out of. */
 .output {
   margin: 0;
+  font-family: inherit;
   max-height: 34rem;
   overflow: auto;
   padding: 0.9rem 1rem;
@@ -358,8 +348,9 @@ dd.data { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
   border-radius: var(--radius);
 }
 .verdict .icon { width: 1.3rem; height: 1.3rem; margin-top: 0.15rem; }
-.verdict h2 { margin: 0; font-size: 1.1rem; font-weight: 500; }
-.verdict p { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.9rem; }
+/* The heading can carry a name parsed out of a file, so it has to break. */
+.verdict h2 { margin: 0; font-size: 1.1rem; font-weight: 500; overflow-wrap: anywhere; }
+.verdict p { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.9rem; overflow-wrap: anywhere; }
 .verdict--good { border-left-color: var(--accent); }
 .verdict--info { border-left-color: var(--line-strong); }
 .verdict--warn { border-left-color: var(--warn); }
