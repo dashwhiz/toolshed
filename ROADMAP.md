@@ -47,7 +47,7 @@ Fully offline. Nothing leaves the browser — say so on every page.
 | Link inspector | `link` | on-portfolio | Punycode/IDN homograph detection, unwrap Outlook/Proofpoint safelinks, explain tracking params |
 | Hidden characters | `unicode` | on-portfolio | Zero-width, homoglyphs, smart quotes, NBSP — catches phishing and broken code |
 | JWT decoder | `jwt` | on-portfolio | Decode only, never leaves the browser |
-| Certificate decoder | `cert` | shipped | Paste PEM → issuer, subject, SANs, validity |
+| Certificate decoder | `cert` | on-portfolio | Paste PEM → issuer, subject, SANs, validity |
 | Prompt injection scan | `injection-scan` | on-portfolio | Paste content an agent is about to read. See the note below before building |
 
 ### On the injection scan
@@ -73,11 +73,11 @@ Note in `.caveats` that a site can serve the agent different content than it ser
 | --- | --- | --- | --- |
 | JSON formatter | `json` | on-portfolio | Two panes. Repairs broken JSON, keeps long numbers exact, warns on duplicate keys |
 | Timestamp converter | `timestamp` | on-portfolio | Epoch ⇄ human, timezone aware |
-| ID generator | `ids` | shipped | UUID v4, ULID, nanoid, bulk + copy |
-| Hash generator | `hash` | shipped | SHA-1/256/512 via WebCrypto (no MD5 — WebCrypto has none) |
+| ID generator | `ids` | on-portfolio | UUID v4, ULID, nanoid, bulk + copy |
+| Hash generator | `hash` | on-portfolio | SHA-1/256/512 via WebCrypto (no MD5 — WebCrypto has none) |
 | Encode/decode bench | `encode` | on-portfolio | Base64, URL, HTML entities. Text and file input |
-| Text bench | `text` | shipped | Case convert, sort, dedupe, trim, count — bulk lines |
-| Colour contrast | `contrast` | shipped | WCAG AA/AAA, suggest nearest passing shade |
+| Text bench | `text` | on-portfolio | Case convert, sort, dedupe, trim, count — bulk lines |
+| Colour contrast | `contrast` | on-portfolio | WCAG AA/AAA, suggest nearest passing shade |
 
 ## Verified data sources
 

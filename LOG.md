@@ -302,3 +302,57 @@ being refused. Two ports failed that way this session. The server already runnin
 
 Next: `ids`, then `text`, then `contrast`.
 
+## 2026-09-01
+The last five tools — `ids`, `text`, `contrast`, `hash`, `cert` — were built in one run and
+pushed without their reviews. Two reviewers went over `d88220a..eb00b6a` in parallel. Between
+them: four Critical and seventeen Important, all fixed. Every one of the four Criticals was
+the same failure — a tool answering confidently and wrongly.
+
+`contrast` searched for a passing shade using fractional RGB channels but printed the rounded
+colour, so 7.4% of its suggestions were hex values that failed the very bar the page said they
+cleared, with the swatch painted in the failing colour. That is the tool's whole reason to
+exist. Rounding now happens inside the search: nought failures in 9,817.
+
+`text` left `\p{M}` out of the class it splits words on, so every combining mark was treated
+as a separator and dropped. `naïve résumé` in decomposed form became `nai_ve_re_sume` while
+the identical-looking composed form came through untouched. Decomposed text is what macOS
+filenames and a lot of database exports contain, and nothing on screen distinguishes them.
+
+`cert` decided between a two- and four-digit year with an ordered regex alternation, so a
+twelve-digit GeneralizedTime split on the wrong boundary and `Date.UTC` normalised the
+impossible month into a plausible date. A certificate that expired in 1998 rendered as
+"Within its dates" with a fabricated 2027 expiry. It now decides on the ASN.1 tag and refuses
+any date that does not round-trip. My first attempt at that fix had its own arithmetic bug
+which rejected valid certificates — the verification caught it before it was committed.
+
+`hash` stripped the algorithm label with a greedy `\d+` applied after whitespace was
+collapsed, so it ran past "SHA-256" and ate the digest's leading digits. Roughly five out of
+eight digests pasted in the ordinary labelled form were reported as "No match" — a red icon
+and three confident wrong sentences about a file that was in fact intact.
+
+The Important findings were mostly the same shape in smaller print: UUID v7 advertised 74
+random bits when the monotonic counter leaves 62, overstating the safe volume sixty-fourfold
+in the exact figure the caveats point at; `lab`, `lch`, `oklab` and `oklch` were listed in the
+colour parser and always rejected; `inherit` and `currentcolor` silently resolved to this
+site's own text colour and produced a verdict about a colour nobody named; a ratio just under
+a threshold displayed as the threshold and said "short by 0"; duplicate certificate extensions
+let the last one win on the CA flag; a context-class decoy tag flipped `Is a CA` to no; the
+inner and outer signature algorithms were never compared; unrecognised name types vanished and
+took the whole names panel with them; a pasted chain reported only the leaf without saying so.
+
+Two things that mattered beyond one tool. `.verdict h2` had no `overflow-wrap`, so a 262-
+character name parsed out of a file scrolled the page sideways by 2,181px at 390px — fixed in
+the shared stylesheet, which fixes it everywhere. And `.output` had been rendering in the
+browser's monospace font since the JSON formatter shipped, against DESIGN's single-family
+rule; it now inherits Roboto.
+
+`cert` also now flags direction overrides and newlines in a subject or issuer. This repo ships
+a whole tool for that trick and its own decoder was falling for it: a crafted name rendered a
+domain on screen that appears nowhere in the certificate's bytes.
+
+Portfolio deliberately untouched. It has moved on — GRIND and Intercept were added and the
+Toolshed blurb rewritten by hand — and finishing the last five tools completes the collection
+without changing what it is for, which is the only reason the rule allows editing it.
+
+All fifteen tools are `on-portfolio` and live. Nothing is queued.
+
