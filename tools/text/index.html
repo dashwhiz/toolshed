@@ -102,11 +102,17 @@
       const words = (line) =>
         line
           .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-          .split(/[^\p{L}\p{N}]+/u)
+          // Combining marks are part of the letter they sit on. Leaving \p{M} out of this
+          // class deleted every accent in decomposed text, which looks the same on screen
+          // as the composed form that came through untouched.
+          .split(/[^\p{L}\p{N}\p{M}]+/u)
           .filter(Boolean);
 
       const titleCase = (line) =>
-        line.replace(/\p{L}[\p{L}\p{M}']*/gu, (w) => w[0].toLocaleUpperCase() + w.slice(1).toLocaleLowerCase());
+        line.replace(/\p{L}[\p{L}\p{M}'\u2019]*/gu, (w) => {
+          const [first] = w; // destructuring takes a whole code point, not half a pair
+          return first.toLocaleUpperCase() + w.slice(first.length).toLocaleLowerCase();
+        });
 
       const OPERATIONS = {
         sort: (lines) => [...lines].sort(collator.compare),
@@ -148,6 +154,21 @@
         },
       };
 
+      /** True when every joiner in the text sits between two pictographs. */
+      function joinsEmoji(text) {
+        const chars = [...text];
+        let sawJoiner = false;
+        for (let i = 0; i < chars.length; i++) {
+          if (chars[i] !== "\u200D") continue;
+          sawJoiner = true;
+          const before = chars[i - 1];
+          const after = chars[i + 1];
+          const pictographic = (c) => c !== undefined && /\p{Extended_Pictographic}/u.test(c);
+          if (!pictographic(before) || !pictographic(after)) return false;
+        }
+        return sawJoiner;
+      }
+
       let lastOutput = "";
 
       function run() {
@@ -156,8 +177,9 @@
 
         // A trailing newline is a line ending, not an empty last line — splitting without
         // accounting for it invents a blank row that was never in the file.
-        const trailing = /\n$/.test(raw);
-        const lines = raw.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n");
+        const normalised = raw.replace(/\r\n?/g, "\n");
+        const trailing = /\n$/.test(normalised);
+        const lines = normalised.replace(/\n$/, "").split("\n");
         const key = els.operation.value;
         const out = OPERATIONS[key](lines);
 
@@ -189,7 +211,13 @@
           });
         }
         const scan = scanText(raw);
-        const notable = scan.groups.filter((g) => g.level === "bad" || g.level === "warn");
+        const notable = scan.groups
+          // A look-alike letter is visible; it belongs to the link inspector's job, not
+          // to a warning that something is hidden here.
+          .filter((g) => g.label !== "Look-alike letters from another alphabet")
+          // A zero-width joiner sitting between two pictographs is building an emoji.
+          .filter((g) => !(/Zero-width joiner/.test(g.label) && joinsEmoji(raw)))
+          .filter((g) => g.level === "bad" || g.level === "warn");
         if (notable.length) {
           findings.push({
             level: "warn",
@@ -210,7 +238,8 @@
         row(els.stats, "Longest line", String(Math.max(0, ...lines.map((l) => [...l].length))), true);
 
         els.results.hidden = false;
-        els.status.textContent = `Applied in this page. Nothing was uploaded.`;
+        const label = els.operation.options[els.operation.selectedIndex].textContent;
+        els.status.textContent = `${label} — applied in this page, nothing was uploaded.`;
         syncCopy();
       }
 

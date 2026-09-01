@@ -67,7 +67,7 @@
         <strong>What this cannot tell you.</strong>
         <ul>
           <li><strong>Uniqueness is overwhelming odds, not a guarantee.</strong> Nothing here checks a database. Two of these can in principle be the same; the figure below is how many you would have to make before that stops being absurd.</li>
-          <li>Random is not the same as secret. These are fine as identifiers. Using one as an unguessable link is a different job, and a ULID has far less randomness in it than the others.</li>
+          <li>Random is not the same as secret. These are fine as identifiers. Using one as an unguessable link is a different job, and the sortable formats have noticeably less randomness in them than a UUID v4 or a nanoid — the figure below says how much.</li>
           <li>Time-ordered formats carry the moment they were made, in the clear. Anyone holding one knows when it was created, to the millisecond.</li>
           <li>The randomness comes from this browser. If the browser's generator is weak or the device's entropy is poor, nothing on this page would show it.</li>
         </ul>
@@ -118,15 +118,16 @@
 
       function tick() {
         const now = Date.now();
-        if (now === lastMs) {
+        // Only a clock that has genuinely moved forward resets the counter. Treating a
+        // backwards step as new would hand out a millisecond and counter already used.
+        if (now > lastMs) {
+          lastMs = now;
+          counter = 0;
+        } else if (counter < 0xfff) {
           counter += 1;
         } else {
-          lastMs = now > lastMs ? now : lastMs;
-          counter = 0;
-        }
-        // 12 bits of counter. Beyond that, borrow from the next millisecond rather than
-        // wrap and emit two identifiers that sort in the wrong order.
-        if (counter > 0xfff) {
+          // 12 bits spent. Borrow the next millisecond rather than wrap and emit two
+          // identifiers that sort in the wrong order.
           lastMs += 1;
           counter = 0;
         }
@@ -159,11 +160,16 @@
       };
 
       let lastUlidRandom = 0n;
+      let lastUlidMs = -1;
 
       function ulid() {
-        const { ms, seq } = tick();
+        const { ms } = tick();
+        // Track the millisecond here rather than reusing the shared counter: that counter
+        // also advances for UUID v7, which would skip the fresh draw a new millisecond needs.
+        const fresh = ms !== lastUlidMs;
+        lastUlidMs = ms;
         // The ULID spec keeps order inside a millisecond by incrementing the random part.
-        if (seq === 0) {
+        if (fresh) {
           let value = 0n;
           for (const byte of randomBytes(10)) value = (value << 8n) | BigInt(byte);
           lastUlidRandom = value;
@@ -191,11 +197,13 @@
         },
         uuid7: {
           label: "UUID v7",
-          bits: 74,
+          // 128 less 48 of timestamp, 4 of version, 12 of monotonic counter and 2 of
+          // variant. The counter is a sequence, so those bits are not randomness.
+          bits: 62,
           timeOrdered: true,
           make: () => uuid7(),
           shape: "36 characters, sorts by creation time",
-          note: "The first 48 bits are the millisecond it was made, which is what makes a run of them sort in order.",
+          note: "The first 48 bits are the millisecond it was made and the next 12 are a counter, which together make a run of them sort in order. That leaves fewer random bits than a v4.",
         },
         ulid: {
           label: "ULID",
@@ -269,11 +277,11 @@
           headline: `${format.bits} bits of randomness each`,
           detail: `a repeat becomes as likely as not somewhere around ${birthdayThreshold(format.bits)} of them. Nothing here checks that these are unused.`,
         });
-        if (key === "ulid") {
+        if (key === "ulid" || key === "uuid7") {
           findings.push({
             level: "info",
-            headline: "A ULID is the least random of these",
-            detail: "80 bits against 122 for a UUID v4. Ample for an identifier, much weaker if you were relying on it being unguessable.",
+            headline: "A sortable id spends bits on being sortable",
+            detail: "the timestamp and ordering take up room that a UUID v4 gives to randomness. Ample for an identifier, weaker if you were relying on one being unguessable.",
           });
         }
         renderFindings(els.findings, findings);

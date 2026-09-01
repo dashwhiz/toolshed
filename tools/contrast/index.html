@@ -64,7 +64,7 @@
         <ul>
           <li>Whether the text is actually readable. The WCAG ratio is a formula over two colours; it knows nothing about the typeface, the weight, the screen, or the person reading. A thin light face at 4.5:1 can still be hard work.</li>
           <li>Anything about the newer APCA measure, which models perception more closely and disagrees with this one — particularly on dark backgrounds, where this formula is known to be generous.</li>
-          <li>The suggested shade is the nearest one on a straight lightness path that clears the bar. It is not the nicest colour, and it may not suit the rest of your palette.</li>
+          <li>The suggested shade is found by mixing your colour towards black and towards white in one per cent steps and taking the first that clears the bar. That is a straight line through RGB rather than a true lightness path, so a slightly closer colour may exist. It is not the nicest colour either, and it may not suit the rest of your palette.</li>
         </ul>
       </div>
     </main>
@@ -88,23 +88,32 @@
         go: document.getElementById("go"),
       };
 
-      /** Resolves any CSS colour through the browser, so names and rgb() work too. */
+      /** Resolves any CSS colour the browser understands, including the newer spaces. */
       const probe = document.createElement("span");
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+
+      // These are valid CSS but name no colour of their own — they would silently pick up
+      // whatever this page's own text colour happens to be.
+      const KEYWORDS = /^(inherit|initial|unset|revert|revert-layer|currentcolor)$/i;
+
       function toRgb(text) {
         const value = text.trim();
-        if (!value) return null;
+        if (!value || KEYWORDS.test(value)) return null;
+        // The style probe answers "is this a colour at all".
         probe.style.color = "";
         probe.style.color = value;
         if (!probe.style.color) return null;
-        document.body.append(probe);
-        const computed = getComputedStyle(probe).color;
-        probe.remove();
-        const match = computed.match(/rgba?\(([^)]+)\)/);
-        if (!match) return null;
-        const parts = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
-        if (parts.length < 3 || parts.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
-        const alpha = parts.length > 3 ? parts[3] : 1;
-        return { r: parts[0], g: parts[1], b: parts[2], a: alpha };
+        // The canvas answers "which colour", and unlike getComputedStyle it hands back
+        // rgb for lab(), lch(), oklab(), oklch() and color() rather than their own syntax.
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return null;
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = value;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+        if (![r, g, b].every(Number.isFinite)) return null;
+        return { r, g, b, a: a / 255 };
       }
 
       const hex = ({ r, g, b }) =>
@@ -125,7 +134,24 @@
         return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
       }
 
+      const THRESHOLDS = [3, 4.5, 7];
       const round = (n) => Math.round(n * 100) / 100;
+
+      /**
+       * Never lets a ratio display as meeting a bar it misses. Rounding 2.999885 to three
+       * places still reads as 3.000, so a value below a threshold is truncated instead.
+       */
+      function show(value) {
+        const rounded = round(value);
+        const misleading = THRESHOLDS.some((t) => rounded >= t && value < t);
+        if (!misleading) return String(rounded);
+        return (Math.floor(value * 1000) / 1000).toFixed(3);
+      }
+
+      const shortfall = (need, value) => {
+        const gap = need - value;
+        return gap < 0.005 ? "a hair under" : `short by ${round(gap)}`;
+      };
 
       // A colour function carries commas and spaces inside its brackets, so the pair
       // cannot be split on those — match whole colours instead of chopping the string up.
@@ -142,10 +168,16 @@
         // First and last, so "#333 on #fff" and "#333 #fff" both work.
         const first = parts[0];
         const last = parts[parts.length - 1];
+        const reject = (token) => {
+          if (KEYWORDS.test(token)) {
+            throw new Error(`"${token}" is a CSS keyword rather than a colour — it means whatever the surrounding page happens to use. Name the colour itself.`);
+          }
+          throw new Error(`"${token}" is not a colour this browser recognises.`);
+        };
         const fg = toRgb(first);
         const bg = toRgb(last);
-        if (!fg) throw new Error(`"${first}" is not a colour this browser recognises.`);
-        if (!bg) throw new Error(`"${last}" is not a colour this browser recognises.`);
+        if (!fg) reject(first);
+        if (!bg) reject(last);
         return { fg, bg };
       }
 
@@ -158,10 +190,12 @@
         for (const towards of [0, 255]) {
           for (let step = 1; step <= 100; step++) {
             const t = step / 100;
+            // Round here, not at display time. A fractional candidate can clear 4.5:1
+            // while the integer colour actually printed does not.
             const candidate = {
-              r: fg.r + (towards - fg.r) * t,
-              g: fg.g + (towards - fg.g) * t,
-              b: fg.b + (towards - fg.b) * t,
+              r: Math.round(fg.r + (towards - fg.r) * t),
+              g: Math.round(fg.g + (towards - fg.g) * t),
+              b: Math.round(fg.b + (towards - fg.b) * t),
             };
             if (ratio(candidate, bg) >= target) {
               if (!best || step < best.step) {
@@ -214,14 +248,14 @@
             level: value >= need ? "good" : "bad",
             headline: `${label} — ${value >= need ? "passes" : "fails"} at ${need}:1`,
             detail: value >= need
-              ? `${round(value)}:1 clears it.`
-              : `${round(value)}:1, short by ${round(need - value)}.`,
+              ? `${show(value)}:1 clears it.`
+              : `${show(value)}:1, ${shortfall(need, value)}.`,
           });
         }
         renderFindings(els.findings, findings);
 
         els.measured.replaceChildren();
-        row(els.measured, "Contrast ratio", `${round(value)}:1`, true);
+        row(els.measured, "Contrast ratio", `${show(value)}:1`, true);
         row(els.measured, "Foreground", hex(fg), true);
         row(els.measured, "Background", hex(bg), true);
         row(els.measured, "Relative luminance", `${round(luminance(fg) * 100) / 100} against ${round(luminance(bg) * 100) / 100}`, true);
@@ -236,22 +270,22 @@
         if (fix) {
           els.suggestion.replaceChildren();
           row(els.suggestion, "Try", hex(fix.colour), true);
-          row(els.suggestion, "Which is", `${fix.step}% ${fix.towards} than what you chose`);
-          row(els.suggestion, "New ratio", `${round(ratio(fix.colour, bg))}:1`, true);
+          row(els.suggestion, "Which is", `${fix.step}% of the way from your colour towards ${fix.towards === "darker" ? "black" : "white"}`);
+          row(els.suggestion, "New ratio", `${show(ratio(fix.colour, bg))}:1`, true);
           paint(els.sampleFixed, fix.colour, bg, "Normal text, adjusted", "1rem");
         }
 
         if (value >= 7) {
-          renderVerdict(els.verdict, "good", `${round(value)}:1 — clears every level`,
+          renderVerdict(els.verdict, "good", `${show(value)}:1 — clears every level`,
             "Passes AAA for normal text, the highest bar WCAG sets. It still says nothing about the typeface.");
         } else if (value >= 4.5) {
-          renderVerdict(els.verdict, "good", `${round(value)}:1 — passes for normal text`,
+          renderVerdict(els.verdict, "good", `${show(value)}:1 — passes for normal text`,
             "Meets AA at any size. AAA would want 7:1.");
         } else if (value >= 3) {
-          renderVerdict(els.verdict, "warn", `${round(value)}:1 — large text only`,
+          renderVerdict(els.verdict, "warn", `${show(value)}:1 — large text only`,
             "Enough for text at 24px, or 18.66px bold, and for interface elements. Not enough for body text.");
         } else {
-          renderVerdict(els.verdict, "bad", `${round(value)}:1 — fails at every size`,
+          renderVerdict(els.verdict, "bad", `${show(value)}:1 — fails at every size`,
             "Below 3:1 nothing passes, including large text and interface elements.");
         }
 
